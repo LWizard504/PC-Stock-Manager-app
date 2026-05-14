@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
+import 'package:pc_dev_flutter/context/locale_provider.dart';
 
 class POSScreen extends StatefulWidget {
   const POSScreen({super.key});
@@ -16,10 +18,8 @@ class _POSScreenState extends State<POSScreen> {
   String _selectedCategory = 'All';
   List<Map<String, dynamic>> _cart = [];
   bool _isLoadingProducts = true;
-  bool _isProcessingCheckout = false;
   List<Map<String, dynamic>> _products = [];
   Map<String, dynamic>? _myProfile;
-  
   List<String> _categories = ['All'];
 
   @override
@@ -37,7 +37,7 @@ class _POSScreenState extends State<POSScreen> {
       _myProfile = await supabase.from('profiles').select('*').eq('id', user.id).single();
       await _fetchProducts();
     } catch (e) {
-      debugPrint("Error fetching initial POS data: $e");
+      debugPrint("POS Data Error: $e");
     }
   }
 
@@ -47,24 +47,15 @@ class _POSScreenState extends State<POSScreen> {
       final tenantId = _myProfile?['tenant_id'];
 
       var query = supabase.from('products').select().eq('is_active', true);
-      
-      // Filter by tenant to avoid mixing inventory
-      if (tenantId != null) {
-        query = query.eq('tenant_id', tenantId);
-      }
+      if (tenantId != null) query = query.eq('tenant_id', tenantId);
 
       final response = await query;
-      
       if (mounted) {
         final products = List<Map<String, dynamic>>.from(response);
-        
-        // Extract unique categories from metadata
         final cats = {'All'};
         for (var p in products) {
           final meta = p['metadata'] as Map<String, dynamic>? ?? {};
-          if (meta.containsKey('category')) {
-            cats.add(meta['category']);
-          }
+          if (meta.containsKey('category')) cats.add(meta['category']);
         }
 
         setState(() {
@@ -92,9 +83,7 @@ class _POSScreenState extends State<POSScreen> {
   void _updateQuantity(int index, int delta) {
     setState(() {
       _cart[index]['qty'] += delta;
-      if (_cart[index]['qty'] <= 0) {
-        _cart.removeAt(index);
-      }
+      if (_cart[index]['qty'] <= 0) _cart.removeAt(index);
     });
   }
 
@@ -104,13 +93,14 @@ class _POSScreenState extends State<POSScreen> {
 
   Future<void> _processCheckout() async {
     if (_cart.isEmpty) return;
+    final t = Provider.of<LocaleProvider>(context, listen: false).t;
 
     ToastUtils.showPromiseToast(
       context, 
-      message: "Procesando transacción...", 
+      message: "Authorizing Payment...", 
       promise: _executeCheckout(), 
-      successMessage: "Venta completada", 
-      errorMessage: "Error en el pago"
+      successMessage: "Transaction Complete", 
+      errorMessage: "Payment Protocol Error"
     );
   }
 
@@ -122,9 +112,7 @@ class _POSScreenState extends State<POSScreen> {
       final tenantId = _myProfile?['tenant_id'];
       final branchId = _myProfile?['branch_id'];
 
-      if (tenantId == null || branchId == null) {
-        throw Exception("Perfil incompleto: Falta Tenant o Sucursal");
-      }
+      if (tenantId == null || branchId == null) throw Exception("Identity Mismatch");
 
       final itemsJson = _cart.map((item) => {
         'id': item['id'],
@@ -140,16 +128,14 @@ class _POSScreenState extends State<POSScreen> {
         'p_items': itemsJson
       });
 
-      if (mounted) {
-        setState(() => _cart.clear());
-      }
-    } catch (e) {
-      rethrow;
-    }
+      if (mounted) setState(() => _cart.clear());
+    } catch (e) { rethrow; }
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = Provider.of<LocaleProvider>(context).t;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Row(
@@ -161,39 +147,40 @@ class _POSScreenState extends State<POSScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeader(),
+                  _buildHeader(t),
                   const SizedBox(height: 32),
                   _buildCategoryFilter(),
                   const SizedBox(height: 32),
-                  Expanded(child: _buildProductGrid()),
+                  Expanded(child: _buildProductGrid(t)),
                 ],
               ),
             ),
           ),
-          _buildCartSidebar(),
+          _buildCartSidebar(t),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(String Function(String) t) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Terminal de Venta", style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 32, fontWeight: FontWeight.w900)),
+            Text(t('pos_title'), style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1.5)),
             const SizedBox(height: 8),
-            Text(_myProfile?['full_name'] ?? "Operador", style: const TextStyle(color: Colors.white38, fontSize: 16)),
+            Text(_myProfile?['full_name']?.toString().toUpperCase() ?? "OPERATIVE UNIT", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1.5)),
           ],
         ),
         SizedBox(
           width: 300,
           child: TextField(
             decoration: InputDecoration(
-              hintText: "Escanear SKU o buscar...",
-              prefixIcon: const Icon(LucideIcons.search, color: Colors.white24),
+              hintText: "SCAN SKU / SEARCH...",
+              hintStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1, color: Colors.white10),
+              prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
               filled: true,
               fillColor: AppTheme.surfaceDark,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -218,8 +205,8 @@ class _POSScreenState extends State<POSScreen> {
               onSelected: (val) => setState(() => _selectedCategory = cat),
               selectedColor: Colors.red,
               backgroundColor: AppTheme.surfaceDark,
-              labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontSize: 10, fontWeight: FontWeight.w900),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? Colors.red : Colors.white10)),
+              labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontSize: 9, fontWeight: FontWeight.black, letterSpacing: 1),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? Colors.red : Colors.white.withOpacity(0.05))),
             ),
           );
         }).toList(),
@@ -227,7 +214,7 @@ class _POSScreenState extends State<POSScreen> {
     ).animate().fadeIn();
   }
 
-  Widget _buildProductGrid() {
+  Widget _buildProductGrid(String Function(String) t) {
     if (_isLoadingProducts) return const Center(child: CircularProgressIndicator(color: Colors.red));
     
     final filteredProducts = _products.where((p) {
@@ -236,12 +223,12 @@ class _POSScreenState extends State<POSScreen> {
       return meta['category'] == _selectedCategory;
     }).toList();
 
-    if (filteredProducts.isEmpty) return const Center(child: Text("Sin productos en esta categoría", style: TextStyle(color: Colors.white24)));
+    if (filteredProducts.isEmpty) return const Center(child: Text("NO ASSETS FOUND", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.black, fontSize: 10)));
 
     return GridView.builder(
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 220,
-        childAspectRatio: 0.75,
+        childAspectRatio: 0.72,
         crossAxisSpacing: 24,
         mainAxisSpacing: 24,
       ),
@@ -253,10 +240,11 @@ class _POSScreenState extends State<POSScreen> {
   Widget _buildProductCard(Map<String, dynamic> product) {
     return InkWell(
       onTap: () => _addToCart(product),
+      borderRadius: BorderRadius.circular(24),
       child: Container(
         decoration: BoxDecoration(
           color: AppTheme.surfaceDark,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: Colors.white.withOpacity(0.05)),
         ),
         child: Column(
@@ -264,7 +252,7 @@ class _POSScreenState extends State<POSScreen> {
           children: [
             Expanded(
               child: Container(
-                margin: const EdgeInsets.all(8),
+                margin: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.black26, 
                   borderRadius: BorderRadius.circular(16),
@@ -282,9 +270,9 @@ class _POSScreenState extends State<POSScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(product['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(product['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.black, fontSize: 11, letterSpacing: 0.5), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
-                  Text("\$${product['price'].toStringAsFixed(2)}", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 18)),
+                  Text("\$${product['price'].toStringAsFixed(2)}", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -1)),
                 ],
               ),
             ),
@@ -294,7 +282,7 @@ class _POSScreenState extends State<POSScreen> {
     ).animate().scale(delay: 50.ms);
   }
 
-  Widget _buildCartSidebar() {
+  Widget _buildCartSidebar(String Function(String) t) {
     return Container(
       width: 400,
       decoration: const BoxDecoration(
@@ -303,24 +291,24 @@ class _POSScreenState extends State<POSScreen> {
       ),
       child: Column(
         children: [
-          _buildCartHeader(),
+          _buildCartHeader(t),
           Expanded(child: _buildCartItems()),
-          _buildCartTotals(),
+          _buildCartTotals(t),
         ],
       ),
     ).animate().slideX(begin: 1, end: 0);
   }
 
-  Widget _buildCartHeader() {
+  Widget _buildCartHeader(String Function(String) t) {
     return Container(
       padding: const EdgeInsets.all(32),
       child: Row(
         children: [
-          const Icon(LucideIcons.shoppingCart, color: Colors.red),
+          const Icon(LucideIcons.shoppingCart, color: Colors.red, size: 20),
           const SizedBox(width: 16),
-          const Text("Caja Registradora", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+          const Text("TRANSACTION BUFFER", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1)),
           const Spacer(),
-          Text("${_cart.length} items", style: const TextStyle(color: Colors.white38)),
+          Text("${_cart.length} UNIT(S)", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.black)),
         ],
       ),
     );
@@ -332,9 +320,9 @@ class _POSScreenState extends State<POSScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(LucideIcons.box, size: 64, color: Colors.white.withOpacity(0.05)),
+            Icon(LucideIcons.box, size: 48, color: Colors.white.withOpacity(0.03)),
             const SizedBox(height: 16),
-            const Text("Carrito Vacío", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.bold)),
+            const Text("BUFFER EMPTY", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.black, fontSize: 10, letterSpacing: 2)),
           ],
         ),
       );
@@ -345,24 +333,24 @@ class _POSScreenState extends State<POSScreen> {
       itemBuilder: (context, index) {
         final item = _cart[index];
         return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.02), borderRadius: BorderRadius.circular(16)),
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.01), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)),
           child: Row(
             children: [
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text("\$${item['price']}", style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.black, fontSize: 11)),
+                    Text("\$${item['price']}", style: const TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
               Row(
                 children: [
                   IconButton(icon: const Icon(LucideIcons.minus, size: 14), onPressed: () => _updateQuantity(index, -1)),
-                  Text("${item['qty']}", style: const TextStyle(fontWeight: FontWeight.w900)),
+                  Text("${item['qty']}", style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
                   IconButton(icon: const Icon(LucideIcons.plus, size: 14, color: Colors.red), onPressed: () => _updateQuantity(index, 1)),
                 ],
               ),
@@ -373,25 +361,25 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 
-  Widget _buildCartTotals() {
+  Widget _buildCartTotals(String Function(String) t) {
     return Container(
       padding: const EdgeInsets.all(32),
       decoration: const BoxDecoration(color: Colors.black, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       child: Column(
         children: [
-          _buildTotalRow("Subtotal", "\$${_subtotal.toStringAsFixed(2)}"),
+          _buildTotalRow("SUBTOTAL", "\$${_subtotal.toStringAsFixed(2)}"),
           const SizedBox(height: 8),
-          _buildTotalRow("Impuestos (15%)", "\$${_tax.toStringAsFixed(2)}"),
+          _buildTotalRow("NETWORK TAX (15%)", "\$${_tax.toStringAsFixed(2)}"),
           const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider(color: Colors.white10)),
-          _buildTotalRow("Total a Pagar", "\$${_total.toStringAsFixed(2)}", isTotal: true),
+          _buildTotalRow("VALUATION TOTAL", "\$${_total.toStringAsFixed(2)}", isTotal: true),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,
             height: 64,
             child: ElevatedButton(
               onPressed: _cart.isEmpty ? null : _processCheckout,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-              child: const Text("PROCESAR PAGO", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 1.5)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+              child: Text(t('pos_checkout'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 2)),
             ),
           ),
         ],
@@ -403,9 +391,10 @@ class _POSScreenState extends State<POSScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(color: isTotal ? Colors.white : Colors.white38, fontWeight: isTotal ? FontWeight.w900 : FontWeight.normal, fontSize: isTotal ? 18 : 14)),
-        Text(val, style: TextStyle(color: isTotal ? Colors.red : Colors.white, fontWeight: FontWeight.w900, fontSize: isTotal ? 24 : 14)),
+        Text(label, style: TextStyle(color: isTotal ? Colors.white : Colors.white24, fontWeight: FontWeight.black, fontSize: isTotal ? 14 : 10, letterSpacing: 1)),
+        Text(val, style: TextStyle(color: isTotal ? Colors.red : Colors.white, fontWeight: FontWeight.w900, fontSize: isTotal ? 22 : 12)),
       ],
     );
   }
 }
+

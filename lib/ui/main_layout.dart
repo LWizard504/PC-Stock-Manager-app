@@ -108,13 +108,13 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  List<SidebarItem> _getSidebarItemsForRole(UserRole role) {
+  List<SidebarItem> _getSidebarItemsForRole(UserRole role, String Function(String) t) {
     switch (role) {
       case UserRole.superadmin:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const SuperAdminDashboardScreen()),
-          SidebarItem(title: "Users", icon: LucideIcons.users, screen: const UsersScreen()),
-          SidebarItem(title: "Pricing Engine", icon: LucideIcons.dollarSign, screen: const PricingScreen()),
+          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('pricing_title'), icon: LucideIcons.dollarSign, screen: const PricingScreen()),
           SidebarItem(title: "Node Status", icon: LucideIcons.activity, screen: const NodeStatusScreen()),
           SidebarItem(title: "Downloads", icon: LucideIcons.downloadCloud, screen: const DownloadsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
@@ -123,16 +123,17 @@ class _MainLayoutState extends State<MainLayout> {
       case UserRole.admin:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const AdminDashboardScreen()),
-          SidebarItem(title: "Inventario", icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: "Personal", icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
+          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
           SidebarItem(title: "Ventas", icon: LucideIcons.receipt, screen: const SalesScreen()),
+          SidebarItem(title: "Pagos", icon: LucideIcons.creditCard, screen: const PaymentsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];
       case UserRole.manager:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const ManagerDashboardScreen()),
-          SidebarItem(title: "Inventario", icon: LucideIcons.package2, screen: const InventoryScreen()),
+          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
           SidebarItem(title: "Ventas", icon: LucideIcons.history, screen: const SalesScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
@@ -140,15 +141,15 @@ class _MainLayoutState extends State<MainLayout> {
       case UserRole.it:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const ITDashboardScreen()),
-          SidebarItem(title: "Inventario", icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: "Usuarios", icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
+          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];
       case UserRole.employee:
         return [
-          SidebarItem(title: "POS", icon: LucideIcons.shoppingCart, screen: const POSScreen()),
-          SidebarItem(title: "Inventario", icon: LucideIcons.package2, screen: const InventoryScreen()),
+          SidebarItem(title: t('pos_title'), icon: LucideIcons.shoppingCart, screen: const POSScreen()),
+          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];
@@ -163,6 +164,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   @override
   Widget build(BuildContext context) {
+    final t = Provider.of<LocaleProvider>(context).t;
     if (_isLoadingProfile || _currentUser == null) {
       return Scaffold(
         backgroundColor: AppTheme.backgroundDark,
@@ -170,7 +172,7 @@ class _MainLayoutState extends State<MainLayout> {
       );
     }
 
-    final items = _getSidebarItemsForRole(_currentUser!.role);
+    final items = _getSidebarItemsForRole(_currentUser!.role, t);
     
     if (_selectedIndex >= items.length) {
       _selectedIndex = 0;
