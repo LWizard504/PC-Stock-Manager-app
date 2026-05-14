@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/models/app_user.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
+import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/ui/screens/superadmin/dashboard_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/dashboard_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/manager/dashboard_screen.dart';
@@ -17,6 +19,7 @@ import 'package:pc_dev_flutter/ui/screens/shared/chat_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/settings_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/employee/pos_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/sales_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/admin/payments_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 
 class SidebarItem {

@@ -306,8 +306,8 @@ class _UsersScreenState extends State<UsersScreen> {
                 color: const Color(0xFF1A1A1A),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white10)),
                 onSelected: (val) {
-                  if (val == 'reset') ToastUtils.showToast(context, message: "Reset Protocol Initiated");
-                  if (val == 'delete') ToastUtils.showToast(context, message: "Purge Protocol Initiated", isError: true);
+                  if (val == 'reset') ToastUtils.showCustomToast(context, "Reset Protocol Initiated");
+                  if (val == 'delete') ToastUtils.showCustomToast(context, "Purge Protocol Initiated", isError: true);
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(value: 'reset', child: Text("Reset Password", style: TextStyle(color: Colors.white, fontSize: 12))),

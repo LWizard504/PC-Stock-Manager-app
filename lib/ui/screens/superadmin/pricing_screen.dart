@@ -59,7 +59,7 @@ class _PricingScreenState extends State<PricingScreen> {
             TextField(
               controller: priceController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: "Monthly Price ($)", labelStyle: TextStyle(color: Colors.white38)),
+              decoration: const InputDecoration(labelText: "Monthly Price (\$)", labelStyle: TextStyle(color: Colors.white38)),
               style: const TextStyle(color: Colors.white),
             ),
           ],
@@ -165,7 +165,7 @@ class _PricingScreenState extends State<PricingScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(color: AppTheme.primaryColor, borderRadius: BorderRadius.circular(10)),
-              child: const Text("RECOMMENDED", style: TextStyle(fontSize: 9, fontWeight: FontWeight.black, letterSpacing: 1)),
+              child: const Text("RECOMMENDED", style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
             ),
           const SizedBox(height: 16),
           Text(plan['name'].toString().toUpperCase(), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)),

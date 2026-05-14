@@ -89,7 +89,7 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   void _exportPDF() {
-    ToastUtils.showToast(context, message: "Generating PDF Ledger...");
+    ToastUtils.showCustomToast(context, "Generating PDF Ledger...");
     // Logic for PDF generation will go here after package install
   }
 
@@ -152,7 +152,7 @@ class _SalesScreenState extends State<SalesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          const Text("TOTAL REVENUE", style: TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.black, letterSpacing: 1.2)),
+          const Text("TOTAL REVENUE", style: TextStyle(color: Colors.white38, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 1.2)),
           Text("\$${NumberFormat("#,##0.00").format(_totalRevenue)}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppTheme.primaryColor)),
         ],
       ),
@@ -199,7 +199,7 @@ class _SalesScreenState extends State<SalesScreen> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                headingTextStyle: const TextStyle(color: Colors.white38, fontWeight: FontWeight.black, fontSize: 10, letterSpacing: 1),
+                headingTextStyle: const TextStyle(color: Colors.white38, fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 1),
                 columns: const [
                   DataColumn(label: Text("RECEIPT ID")),
                   DataColumn(label: Text("TIMESTAMP")),
@@ -220,7 +220,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     DataCell(Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.green.withOpacity(0.2))),
-                      child: const Text("SYNCED", style: TextStyle(fontSize: 8, fontWeight: FontWeight.black, color: Colors.green)),
+                      child: const Text("SYNCED", style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.green)),
                     )),
                     DataCell(Row(
                       children: [

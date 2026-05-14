@@ -171,7 +171,7 @@ class _POSScreenState extends State<POSScreen> {
           children: [
             Text(t('pos_title'), style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1.5)),
             const SizedBox(height: 8),
-            Text(_myProfile?['full_name']?.toString().toUpperCase() ?? "OPERATIVE UNIT", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1.5)),
+            Text(_myProfile?['full_name']?.toString().toUpperCase() ?? "OPERATIVE UNIT", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
           ],
         ),
         SizedBox(
@@ -179,7 +179,7 @@ class _POSScreenState extends State<POSScreen> {
           child: TextField(
             decoration: InputDecoration(
               hintText: "SCAN SKU / SEARCH...",
-              hintStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1, color: Colors.white10),
+              hintStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1, color: Colors.white10),
               prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
               filled: true,
               fillColor: AppTheme.surfaceDark,
@@ -205,7 +205,7 @@ class _POSScreenState extends State<POSScreen> {
               onSelected: (val) => setState(() => _selectedCategory = cat),
               selectedColor: Colors.red,
               backgroundColor: AppTheme.surfaceDark,
-              labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontSize: 9, fontWeight: FontWeight.black, letterSpacing: 1),
+              labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.white38, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: isSelected ? Colors.red : Colors.white.withOpacity(0.05))),
             ),
           );
@@ -223,7 +223,7 @@ class _POSScreenState extends State<POSScreen> {
       return meta['category'] == _selectedCategory;
     }).toList();
 
-    if (filteredProducts.isEmpty) return const Center(child: Text("NO ASSETS FOUND", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.black, fontSize: 10)));
+    if (filteredProducts.isEmpty) return const Center(child: Text("NO ASSETS FOUND", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.w900, fontSize: 10)));
 
     return GridView.builder(
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -270,7 +270,7 @@ class _POSScreenState extends State<POSScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(product['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.black, fontSize: 11, letterSpacing: 0.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(product['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
                   Text("\$${product['price'].toStringAsFixed(2)}", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -1)),
                 ],
@@ -308,7 +308,7 @@ class _POSScreenState extends State<POSScreen> {
           const SizedBox(width: 16),
           const Text("TRANSACTION BUFFER", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1)),
           const Spacer(),
-          Text("${_cart.length} UNIT(S)", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.black)),
+          Text("${_cart.length} UNIT(S)", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900)),
         ],
       ),
     );
@@ -322,7 +322,7 @@ class _POSScreenState extends State<POSScreen> {
           children: [
             Icon(LucideIcons.box, size: 48, color: Colors.white.withOpacity(0.03)),
             const SizedBox(height: 16),
-            const Text("BUFFER EMPTY", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.black, fontSize: 10, letterSpacing: 2)),
+            const Text("BUFFER EMPTY", style: TextStyle(color: Colors.white10, fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 2)),
           ],
         ),
       );
@@ -342,7 +342,7 @@ class _POSScreenState extends State<POSScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.black, fontSize: 11)),
+                    Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
                     Text("\$${item['price']}", style: const TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
                   ],
                 ),
@@ -391,7 +391,7 @@ class _POSScreenState extends State<POSScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(color: isTotal ? Colors.white : Colors.white24, fontWeight: FontWeight.black, fontSize: isTotal ? 14 : 10, letterSpacing: 1)),
+        Text(label, style: TextStyle(color: isTotal ? Colors.white : Colors.white24, fontWeight: FontWeight.w900, fontSize: isTotal ? 14 : 10, letterSpacing: 1)),
         Text(val, style: TextStyle(color: isTotal ? Colors.red : Colors.white, fontWeight: FontWeight.w900, fontSize: isTotal ? 22 : 12)),
       ],
     );

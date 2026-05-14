@@ -114,7 +114,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("ACTIVE SUBSCRIPTION", style: TextStyle(color: AppTheme.primaryColor, fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1.5)),
+                  const Text("ACTIVE SUBSCRIPTION", style: TextStyle(color: AppTheme.primaryColor, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
                   const SizedBox(height: 8),
                   Text(tier.toUpperCase(), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -1)),
                 ],
@@ -128,7 +128,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                 ),
                 child: Text(
                   isActive ? "ENCRYPTED & ACTIVE" : "TERMINATED",
-                  style: TextStyle(color: isActive ? Colors.green : Colors.red, fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1),
+                  style: TextStyle(color: isActive ? Colors.green : Colors.red, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
                 ),
               ),
             ],
@@ -181,7 +181,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text("TRANSACTION LOGS", style: TextStyle(color: Colors.white24, fontSize: 12, fontWeight: FontWeight.black, letterSpacing: 1.5)),
+        const Text("TRANSACTION LOGS", style: TextStyle(color: Colors.white24, fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
         const SizedBox(height: 24),
         if (_history.isEmpty)
           const Center(child: Padding(padding: EdgeInsets.all(48), child: Text("No transactions found in ledger.", style: TextStyle(color: Colors.white10))))
@@ -209,7 +209,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                         ],
                       ),
                     ),
-                    const Text("SUCCESS", style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.black, letterSpacing: 1)),
+                    const Text("SUCCESS", style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)),
                   ],
                 ),
               );
