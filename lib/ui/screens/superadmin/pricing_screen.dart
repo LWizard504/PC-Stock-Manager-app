@@ -28,8 +28,8 @@ class _PricingScreenState extends State<PricingScreen> {
     try {
       final response = await Supabase.instance.client
           .from('subscription_plans')
-          .select('*')
-          .order('price_monthly', ascending: true);
+          .select('id, name, price, features, is_active, paddle_id, billing_interval')
+          .order('price', ascending: true);
 
       if (mounted) {
         setState(() {
@@ -173,7 +173,7 @@ class _PricingScreenState extends State<PricingScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text("\$${plan['price_monthly']}", style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: AppTheme.primaryColor, letterSpacing: -2)),
+              Text("\$$price", style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, color: AppTheme.primaryColor, letterSpacing: -2)),
               const Padding(padding: EdgeInsets.only(bottom: 8.0, left: 4), child: Text("/mo", style: TextStyle(color: Colors.white38, fontSize: 14, fontWeight: FontWeight.bold))),
             ],
           ),
