@@ -5,6 +5,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/services/config.dart';
 
 class Participant {
   final String id;
@@ -49,6 +50,7 @@ class CallScreen extends StatefulWidget {
 class _CallScreenState extends State<CallScreen> {
   final _localRenderer = RTCVideoRenderer();
   final Map<String, RTCPeerConnection> _peerConnections = {};
+  final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
   final Map<String, Participant> _remoteParticipants = {};
   
   bool _inCall = false;
@@ -110,7 +112,17 @@ class _CallScreenState extends State<CallScreen> {
           candidateData['sdpMid'],
           candidateData['sdpMLineIndex'],
         );
-        await _peerConnections[senderId]?.addCandidate(candidate);
+        if (_peerConnections.containsKey(senderId)) {
+          final pc = _peerConnections[senderId]!;
+          if (await pc.getRemoteDescription() != null) {
+            await pc.addCandidate(candidate);
+          } else {
+            _pendingCandidates.putIfAbsent(senderId, () => []).add(candidate);
+          }
+        } else {
+          _pendingCandidates.putIfAbsent(senderId, () => []).add(candidate);
+          debugPrint("CallScreen: Queued ICE candidate for $senderId");
+        }
       } else if (type == 'call-answer' || payload['answer'] != null) {
         final answer = payload['answer'];
         final desc = RTCSessionDescription(answer['sdp'], answer['type']);
@@ -134,17 +146,7 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<RTCPeerConnection> _createPeerConnection(String remoteUserId, String remoteUserName, String? remoteAvatar) async {
-    final pc = await createPeerConnection({
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-        {'urls': 'stun:stun1.l.google.com:19302'},
-        {
-          'urls': 'turn:openrelay.metered.ca:80',
-          'username': 'openrelayproject',
-          'credential': 'openrelayproject'
-        },
-      ]
-    });
+    final pc = await createPeerConnection(AppConfig.iceServers);
 
     _localStream!.getTracks().forEach((track) {
       pc.addTrack(track, _localStream!);
@@ -162,6 +164,9 @@ class _CallScreenState extends State<CallScreen> {
 
     pc.onTrack = (event) async {
       debugPrint("CallScreen: Received remote track: ${event.track.kind}");
+      if (event.track.kind == 'audio') {
+        event.track.enabled = true;
+      }
       if (event.track.kind == 'video' || event.track.kind == 'audio') {
         if (!_remoteParticipants.containsKey(remoteUserId)) {
           final renderer = RTCVideoRenderer();
@@ -184,7 +189,22 @@ class _CallScreenState extends State<CallScreen> {
     };
 
     _peerConnections[remoteUserId] = pc;
+
     return pc;
+  }
+
+  Future<void> _processPendingCandidates(String remoteUserId) async {
+    final pc = _peerConnections[remoteUserId];
+    if (pc != null && await pc.getRemoteDescription() != null) {
+      if (_pendingCandidates.containsKey(remoteUserId)) {
+        final candidates = _pendingCandidates[remoteUserId]!;
+        for (var candidate in candidates) {
+          await pc.addCandidate(candidate);
+        }
+        debugPrint("CallScreen: Processed ${candidates.length} queued ICE candidates for $remoteUserId");
+        _pendingCandidates.remove(remoteUserId);
+      }
+    }
   }
 
   Future<void> _initiateCall() async {
@@ -206,7 +226,14 @@ class _CallScreenState extends State<CallScreen> {
 
   Future<void> _sendOffer(String targetId) async {
     final pc = await _createPeerConnection(targetId, widget.contact['full_name'] ?? widget.contact['name'] ?? 'User', widget.contact['avatar_url'] ?? widget.contact['avatar']);
-    final offer = await pc.createOffer();
+    final constraints = {
+      'mandatory': {
+        'OfferToReceiveAudio': true,
+        'OfferToReceiveVideo': widget.isVideo,
+      },
+      'optional': [],
+    };
+    final offer = await pc.createOffer(constraints);
     await pc.setLocalDescription(offer);
 
     _sendSignal('call-offer', {
@@ -247,8 +274,17 @@ class _CallScreenState extends State<CallScreen> {
     
     final desc = RTCSessionDescription(widget.initialOffer!['sdp'], widget.initialOffer!['type']);
     await pc.setRemoteDescription(desc);
+    
+    await _processPendingCandidates(remoteUserId);
 
-    final answer = await pc.createAnswer();
+    final constraints = {
+      'mandatory': {
+        'OfferToReceiveAudio': true,
+        'OfferToReceiveVideo': widget.isVideo,
+      },
+      'optional': [],
+    };
+    final answer = await pc.createAnswer(constraints);
     await pc.setLocalDescription(answer);
 
     _sendSignal('call-answer', {
@@ -262,22 +298,24 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   void _removeParticipant(String userId) {
-    if (_remoteParticipants.containsKey(userId)) {
-      _remoteParticipants[userId]!.renderer.dispose();
-      setState(() {
-        _remoteParticipants.remove(userId);
-        if (_remoteParticipants.isEmpty && widget.isGroup) {
-          // Keep call alive in groups or exit if last one? 
-          // Usually keep alive until user hangs up
-        }
-      });
-    }
     try {
-      _peerConnections[userId]?.close();
+       if (_remoteParticipants.containsKey(userId)) {
+        final p = _remoteParticipants[userId]!;
+        p.renderer.srcObject = null;
+        p.renderer.dispose();
+        setState(() {
+          _remoteParticipants.remove(userId);
+        });
+      }
+      
+      final pc = _peerConnections[userId];
+      if (pc != null) {
+        pc.close();
+        _peerConnections.remove(userId);
+      }
     } catch (e) {
-      debugPrint("Error closing peer connection: $e");
+      debugPrint("Error removing participant $userId: $e");
     }
-    _peerConnections.remove(userId);
   }
 
   void _endCall({bool sendSignal = true}) {
@@ -321,6 +359,10 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    // Neural Node Cleanup: Prevent signaling callbacks from firing on disposed screen
+    _signaling.onSignal = null;
+    _signaling.onHangup = null;
+    
     _localStream?.getTracks().forEach((t) => t.stop());
     _peerConnections.values.forEach((pc) {
       try {
@@ -385,23 +427,45 @@ class _CallScreenState extends State<CallScreen> {
       );
     }
 
-    int crossAxisCount = totalCount <= 1 ? 1 : (totalCount <= 2 ? 1 : 2);
-    if (totalCount > 4) crossAxisCount = 3;
-
-    return GridView.builder(
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.0,
-      ),
-      itemCount: totalCount,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildVideoCard("Tú", _localRenderer, _isVideoMuted, isLocal: true);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        int cols;
+        int rows;
+        
+        if (totalCount == 1) {
+          cols = 1; rows = 1;
+        } else if (totalCount == 2) {
+          cols = 2; rows = 1;
+        } else if (totalCount <= 4) {
+          cols = 2; rows = 2;
+        } else if (totalCount <= 6) {
+          cols = 3; rows = 2;
+        } else {
+          cols = 3; rows = (totalCount / 3).ceil();
         }
-        final p = participants[index - 1];
-        return _buildVideoCard(p.name, p.renderer, !p.isVideoEnabled, avatar: p.avatar);
+
+        // Calculate the best aspect ratio to fit everything without scrolling
+        double itemWidth = (constraints.maxWidth - (cols - 1) * 12) / cols;
+        double itemHeight = (constraints.maxHeight - (rows - 1) * 12) / rows;
+        double aspectRatio = itemHeight > 0 ? (itemWidth / itemHeight) : 1.0;
+
+        return GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: cols,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: aspectRatio,
+          ),
+          itemCount: totalCount,
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return _buildVideoCard("Tú", _localRenderer, _isVideoMuted, isLocal: true);
+            }
+            final p = participants[index - 1];
+            return _buildVideoCard(p.name, p.renderer, !p.isVideoEnabled, avatar: p.avatar);
+          },
+        );
       },
     );
   }

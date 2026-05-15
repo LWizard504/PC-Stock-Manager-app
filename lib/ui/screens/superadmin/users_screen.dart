@@ -38,6 +38,7 @@ class _UsersScreenState extends State<UsersScreen> {
 
   Future<void> _fetchUsers() async {
     try {
+      if (mounted) setState(() => _isLoading = true);
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception("No auth");
@@ -157,10 +158,14 @@ class _UsersScreenState extends State<UsersScreen> {
   Future<void> _executeCreation(String name, String email, String password, String role) async {
     try {
       final supabase = Supabase.instance.client;
-      final myProfile = await supabase.from('profiles').select('tenant_id').eq('id', supabase.auth.currentUser!.id).single();
-      final tenantId = myProfile['tenant_id'];
+      
+      // Neural Protocol: Use an isolated client to avoid session hijacking
+      final tempClient = SupabaseClient(supabase.supabaseUrl, supabase.supabaseKey);
+      
+      final myProfileResponse = await supabase.from('profiles').select('tenant_id').eq('id', supabase.auth.currentUser!.id).single();
+      final tenantId = myProfileResponse['tenant_id'];
 
-      await supabase.auth.signUp(
+      final response = await tempClient.auth.signUp(
         email: email,
         password: password,
         data: {
@@ -169,6 +174,18 @@ class _UsersScreenState extends State<UsersScreen> {
           'role': role,
         },
       );
+
+      if (response.user == null) throw Exception("Provisioning Failure: No user returned");
+
+      // Force-sync the profile with the email to ensure visibility in pcdev
+      // Since we are SuperAdmin, we can upsert this record safely
+      await supabase.from('profiles').upsert({
+        'id': response.user!.id,
+        'email': email,
+        'full_name': name,
+        'role': role,
+        'tenant_id': tenantId,
+      });
       
       _loadData();
     } catch (e) {

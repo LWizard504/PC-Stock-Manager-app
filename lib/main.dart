@@ -5,14 +5,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
+import 'package:pc_dev_flutter/services/config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize Supabase with production URL and Anon Key
   await Supabase.initialize(
-    url: 'https://fctewfmsofdcqrwlxoyo.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdGV3Zm1zb2ZkY3Fyd2x4b3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3NDYzNDUsImV4cCI6MjA5MjMyMjM0NX0.efBvCsV_hfUYWskDoVmc5PPEB97RoCsDkgctj7X8g4g',
+    url: AppConfig.supabaseUrl,
+    anonKey: AppConfig.supabaseAnonKey,
   );
 
   runApp(

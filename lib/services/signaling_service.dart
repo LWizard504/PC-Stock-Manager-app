@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pc_dev_flutter/services/config.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class SignalingService {
   static final SignalingService _instance = SignalingService._internal();
@@ -8,7 +11,7 @@ class SignalingService {
   SignalingService._internal();
 
   io.Socket? socket;
-  final String _serverUrl = "https://api-stockm-call-service.onrender.com";
+  final String _serverUrl = AppConfig.signalingUrl;
   
   // Callbacks for UI updates
   Function(Map<String, dynamic>)? onNewMessage;
@@ -16,19 +19,28 @@ class SignalingService {
   Function(Map<String, dynamic>)? onSignal;
   Function(Map<String, dynamic>)? onHangup;
   Function(Map<String, dynamic>)? onTyping;
+  Function(Map<String, dynamic>)? onRecording;
   Function(List<String>)? onOnlineUsers;
   Function(String)? onUserOnline;
   Function(String)? onUserOffline;
+  Function(String, String)? onMessageSent;
 
   Future<void> init({List<String> groupIds = const []}) async {
-    if (socket != null && socket!.connected) return;
+    if (socket != null && socket!.connected) {
+      debugPrint('SignalingService: Socket already connected, skipping init');
+      return;
+    }
 
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      debugPrint('SignalingService: No user found for init');
+      return;
+    }
 
     final session = supabase.auth.currentSession;
     final token = session?.accessToken;
+    debugPrint('SignalingService: Initializing socket with token: ${token?.substring(0, 10)}...');
 
     socket = io.io(_serverUrl, io.OptionBuilder()
       .setTransports(['websocket'])
@@ -37,17 +49,29 @@ class SignalingService {
       .build());
 
     socket!.onConnect((_) {
-      debugPrint('SignalingService: Connected to Signaling Server');
+      debugPrint('SignalingService: Socket Connected. ID: ${socket!.id}');
       socket!.emit('get-online-users');
-      socket!.emit('register', { 'userId': user.id, 'groups': groupIds });
+      // Neural Protocol: Only send groups, server derives userId from token
+      debugPrint('SignalingService: Emitting register with groups: $groupIds');
+      socket!.emit('register', { 'groups': groupIds });
     });
 
     socket!.onConnectError((data) => debugPrint('SignalingService: Connect Error: $data'));
-    socket!.onDisconnect((_) => debugPrint('SignalingService: Disconnected'));
+    socket!.onDisconnect((_) => debugPrint('SignalingService: Socket Disconnected'));
 
-    socket!.on('message', (data) {
+    socket!.on('new-message', (data) {
       debugPrint("SignalingService: Received message: $data");
       if (onNewMessage != null) onNewMessage!(Map<String, dynamic>.from(data));
+    });
+
+    socket!.on('typing', (data) {
+      debugPrint("SignalingService: Received typing: $data");
+      if (onTyping != null) onTyping!(Map<String, dynamic>.from(data));
+    });
+
+    socket!.on('recording', (data) {
+      debugPrint("SignalingService: Received recording: $data");
+      if (onRecording != null) onRecording!(Map<String, dynamic>.from(data));
     });
 
     socket!.on('signal', (data) {
@@ -61,10 +85,6 @@ class SignalingService {
       if (onHangup != null) onHangup!(Map<String, dynamic>.from(data));
     });
 
-    socket!.on('typing', (data) {
-      if (onTyping != null) onTyping!(Map<String, dynamic>.from(data));
-    });
-
     socket!.on('online-users', (data) {
       if (onOnlineUsers != null) onOnlineUsers!(List<String>.from(data));
     });
@@ -76,6 +96,47 @@ class SignalingService {
     socket!.on('user-offline', (data) {
       if (onUserOffline != null) onUserOffline!(data.toString());
     });
+
+    socket!.on('message-sent', (data) {
+      debugPrint("SignalingService: Message persisted: $data");
+      if (onMessageSent != null) onMessageSent!(data['tempId'].toString(), data['dbId'].toString());
+    });
+  }
+
+  // API Proxy Methods (Android Parity)
+  
+  Future<Map<String, dynamic>> fetchContacts() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+    if (token == null) throw Exception("No auth session");
+
+    final response = await http.get(
+      Uri.parse("$_serverUrl/get-contacts"),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception("Failed to fetch contacts: ${response.body}");
+    }
+  }
+
+  Future<List<dynamic>> fetchHistory(String chatId, bool isGroup) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+    if (token == null) throw Exception("No auth session");
+
+    final response = await http.get(
+      Uri.parse("$_serverUrl/get-history?chatId=$chatId&isGroup=$isGroup"),
+      headers: {'Authorization': 'Bearer $token'},
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception("Failed to fetch history: ${response.body}");
+    }
   }
 
   void sendMessage(String to, String content, {bool isGroup = false, String? fileUrl, String? fileType, String? replyTo, String? tempId, String? senderName, String? senderAvatar}) {
@@ -84,6 +145,7 @@ class SignalingService {
       return;
     }
 
+    debugPrint('SignalingService: Emitting send-message to $to');
     socket!.emit('send-message', {
       'to': to,
       'content': content,
@@ -117,10 +179,25 @@ class SignalingService {
       'from': fromId,
     });
   }
+  void sendTyping(String to, bool isTyping, {bool isAudio = false, bool isGroup = false}) {
+    if (socket == null || !socket!.connected) return;
+    socket!.emit('typing', {
+      'to': to,
+      'isTyping': isTyping,
+      'isAudio': isAudio,
+      'isGroup': isGroup,
+    });
+  }
 
   void register(String userId, List<String> groupIds) {
-    if (socket == null || !socket!.connected) return;
-    socket!.emit('register', { 'userId': userId, 'groups': groupIds });
+    if (socket == null || !socket!.connected) {
+      debugPrint('SignalingService: Cannot register, socket not connected');
+      return;
+    }
+    debugPrint('SignalingService: Registering groups: $groupIds');
+    socket!.emit('register', {
+      'groups': groupIds,
+    });
   }
 
   void disconnect() {

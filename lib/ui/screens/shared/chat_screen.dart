@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -32,13 +33,17 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _myName;
   String? _myAvatar;
   RealtimeChannel? _presenceChannel;
+  String? _remoteTypingStatus;
+  Timer? _typingTimer;
+  bool _isSendingTyping = false;
 
   @override
   void initState() {
     super.initState();
     _myId = _supabase.auth.currentUser?.id;
-    _fetchContacts(); // Will trigger _setupRealtime after fetching profile
-// _setupRealtime will be called inside _fetchContacts after profile load
+    _setupRealtime(); // Neural Node: Init signaling immediately to bypass RLS blockers
+    _fetchContacts(); 
+    _messageController.addListener(_onMessageChanged);
   }
 
   void _setupRealtime() {
@@ -62,7 +67,22 @@ class _ChatScreenState extends State<ChatScreen> {
     // 2. Signaling API (Socket.io) Initialization
     _signaling.init();
     
-    _signaling.onNewMessage = (msg) {
+    _signaling.onNewMessage = (data) {
+      debugPrint("ChatScreen: Raw message received from Signaling: $data");
+      
+      final fromData = data['from'];
+      final senderId = fromData is Map ? fromData['id'] : (data['sender_id'] ?? data['from'] ?? data['senderId']);
+      
+      // Neural Mapping: Normalize signaling API fields to Chat UI model
+      final msg = {
+        'id': data['id'] ?? data['tempId'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        'sender_id': senderId,
+        'recipient_id': data['recipient_id'] ?? data['to'],
+        'group_id': data['group_id'] ?? data['groupId'],
+        'content': data['content'] ?? data['text'] ?? '',
+        'created_at': data['created_at'] ?? DateTime.now().toIso8601String(),
+      };
+
       if (_messages.any((m) => m['id'] == msg['id'])) return;
       
       bool isForCurrentChat = false;
@@ -70,11 +90,14 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_selectedContact!['isGroup'] == true) {
           isForCurrentChat = msg['group_id'] == _selectedContact!['id'];
         } else {
-          isForCurrentChat = msg['sender_id'] == _selectedContact!['id'] || msg['recipient_id'] == _selectedContact!['id'];
+          final sId = msg['sender_id'];
+          final selectedId = _selectedContact!['id'];
+          isForCurrentChat = sId == selectedId || msg['recipient_id'] == selectedId;
         }
       }
 
       if (isForCurrentChat) {
+        debugPrint("ChatScreen: Signaling message matches current chat, adding to list.");
         if (mounted) setState(() => _messages.add(msg));
         _scrollToBottom();
       }
@@ -90,6 +113,56 @@ class _ChatScreenState extends State<ChatScreen> {
 
     _signaling.onUserOffline = (id) {
       if (mounted) setState(() => _onlineUserIds.remove(id));
+    };
+
+    _signaling.onMessageSent = (tempId, dbId) {
+      debugPrint("ChatScreen: Message confirmed by server. $tempId -> $dbId");
+      if (mounted) {
+        setState(() {
+          final idx = _messages.indexWhere((m) => m['id'] == tempId);
+          if (idx != -1) {
+            _messages[idx]['id'] = dbId;
+          }
+        });
+      }
+    };
+
+    _signaling.onTyping = (data) {
+      if (_selectedContact == null) return;
+      final fromData = data['from'];
+      final senderId = fromData is Map ? fromData['id'] : (data['userId'] ?? data['from']);
+      
+      if (_isTargetChat(senderId, data['isGroup'] == true, data['groupId'])) {
+        if (mounted) {
+          setState(() {
+            if (data['isTyping'] == true) {
+              _remoteTypingStatus = "escribiendo...";
+              _startTypingTimeout();
+            } else {
+              _remoteTypingStatus = null;
+            }
+          });
+        }
+      }
+    };
+
+    _signaling.onRecording = (data) {
+      if (_selectedContact == null) return;
+      final fromData = data['from'];
+      final senderId = fromData is Map ? fromData['id'] : data['from'];
+      
+      if (_isTargetChat(senderId, data['isGroup'] == true, data['groupId'])) {
+        if (mounted) {
+          setState(() {
+            if (data['isRecording'] == true) {
+              _remoteTypingStatus = "grabando audio...";
+              _startTypingTimeout();
+            } else {
+              _remoteTypingStatus = null;
+            }
+          });
+        }
+      }
     };
 
     _signaling.onIncomingCall = (payload) {
@@ -137,14 +210,68 @@ class _ChatScreenState extends State<ChatScreen> {
     }).eq('id', _myId!).then((_) {}).catchError((e) => debugPrint("Presence update error: $e"));
   }
 
+  bool _isTargetChat(dynamic senderId, bool isGroup, dynamic groupId) {
+    if (_selectedContact == null) return false;
+    if (isGroup) {
+      return groupId == _selectedContact!['id'];
+    } else {
+      return senderId == _selectedContact!['id'];
+    }
+  }
+
+  void _startTypingTimeout() {
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _remoteTypingStatus = null);
+    });
+  }
+
   @override
   void dispose() {
+    _signaling.onNewMessage = null;
+    _signaling.onOnlineUsers = null;
+    _signaling.onUserOffline = null;
+    _signaling.onTyping = null;
+    _signaling.onRecording = null;
+    _typingTimer?.cancel();
     if (_presenceChannel != null) _supabase.removeChannel(_presenceChannel!);
-    // _signaling.disconnect(); // Keep active for global calls
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
+
+  void _onMessageChanged() {
+    if (_selectedContact == null || _myId == null) return;
+    
+    if (_messageController.text.isNotEmpty && !_isSendingTyping) {
+      _isSendingTyping = true;
+      _signaling.sendTyping(
+        _selectedContact!['id'], 
+        true, 
+        isGroup: _selectedContact!['isGroup'] == true
+      );
+      
+      // Reset after a delay to allow re-sending if they keep typing
+      Timer(const Duration(seconds: 3), () {
+        _isSendingTyping = false;
+        if (_messageController.text.isEmpty) {
+          _signaling.sendTyping(
+            _selectedContact!['id'], 
+            false, 
+            isGroup: _selectedContact!['isGroup'] == true
+          );
+        }
+      });
+    } else if (_messageController.text.isEmpty && _isSendingTyping) {
+      _isSendingTyping = false;
+      _signaling.sendTyping(
+        _selectedContact!['id'], 
+        false, 
+        isGroup: _selectedContact!['isGroup'] == true
+      );
+    }
+  }
+
 
 
 
@@ -156,67 +283,30 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      // Get my profile details first to ensure we have name/avatar for presence
-      final myProfileRes = await _supabase.from('profiles').select('tenant_id, role, full_name, avatar_url').eq('id', _myId!).single();
-      _myTenantId = myProfileRes['tenant_id'];
-      final myRole = (myProfileRes['role'] ?? '').toString().toLowerCase();
-      _myName = myProfileRes['full_name'] ?? 'Neural Node';
-      _myAvatar = myProfileRes['avatar_url'];
-
-      // 1. Fetch Profiles (Fetch all and filter locally like the Web API to bypass RLS complexities)
-      List<dynamic> allProfiles = [];
-      try {
-        final res = await _supabase.from('profiles').select('*').neq('id', _myId!).order('full_name');
-        allProfiles = res as List<dynamic>;
-        
-        // RBAC filtering similar to app/api/chat/contacts/route.ts:
-        if (myRole != 'superadmin') {
-          allProfiles = allProfiles.where((p) {
-            final pRole = (p['role'] ?? '').toString().toLowerCase();
-            // Same tenant OR is an admin/superadmin
-            if (p['tenant_id'] == _myTenantId) return true;
-            if (pRole == 'admin' || pRole == 'superadmin') return true;
-            return false;
-          }).toList();
-        }
-        debugPrint("ChatScreen: Profiles fetched and filtered (${allProfiles.length})");
-      } catch (pe) {
-        debugPrint("ChatScreen Warning: Error fetching profiles: $pe");
-      }
-
-      // 2. Fetch Groups
-      List<dynamic> groupsRes = [];
-      try {
-        if (myRole == 'superadmin') {
-          groupsRes = await _supabase.from('chat_groups').select('*');
-        } else {
-          final memberships = await _supabase.from('chat_group_members').select('group_id').eq('user_id', _myId!);
-          final groupIds = (memberships as List).map((m) => m['group_id']).toList();
-          if (groupIds.isNotEmpty) {
-            groupsRes = await _supabase.from('chat_groups').select('*').inFilter('id', groupIds);
-          }
-        }
-        debugPrint("ChatScreen: Groups fetched (${groupsRes.length})");
-      } catch (ge) {
-        debugPrint("ChatScreen Warning: Error fetching groups: $ge");
-      }
-
+      final data = await _signaling.fetchContacts();
+      final myProfile = data['currentProfile'];
+      
       if (mounted) {
         setState(() {
-          _contacts = List<Map<String, dynamic>>.from(allProfiles);
-          _groups = List<Map<String, dynamic>>.from(groupsRes.map((g) => { ...g as Map<String, dynamic>, 'isGroup': true, 'full_name': g['name'] }));
+          _myTenantId = myProfile['tenant_id'];
+          _myName = myProfile['full_name'] ?? 'Neural Node';
+          _myAvatar = myProfile['avatar_url'];
+          
+          _contacts = List<Map<String, dynamic>>.from(data['contacts'] ?? []);
+          _groups = List<Map<String, dynamic>>.from((data['groups'] as List? ?? []).map((g) => {
+            ...g as Map<String, dynamic>,
+            'isGroup': true,
+            'full_name': g['name']
+          }));
           _isLoadingContacts = false;
         });
       }
 
-      // Setup Realtime Presence after we have profile data
-      _setupRealtime();
-      
       // Neural Protocol: Register groups with Signaling API for real-time routing
       _signaling.register(_myId!, _groups.map((g) => g['id'].toString()).toList());
 
     } catch (e) {
-      debugPrint("ChatScreen Fatal Error: $e");
+      debugPrint("ChatScreen Fatal Error fetching contacts via proxy: $e");
       if (mounted) setState(() => _isLoadingContacts = false);
     }
   }
@@ -233,29 +323,21 @@ class _ChatScreenState extends State<ChatScreen> {
       final isGroup = contact['isGroup'] == true;
       debugPrint("ChatScreen: Fetching messages for ${isGroup ? 'group' : 'user'} ${contact['id']}");
 
-      dynamic res;
-      if (isGroup) {
-        res = await _supabase.from('chat_messages')
-          .select()
-          .eq('group_id', contact['id'])
-          .order('created_at', ascending: true);
-      } else {
-        res = await _supabase.from('chat_messages')
-          .select()
-          .or('and(sender_id.eq.$_myId,recipient_id.eq.${contact['id']}),and(sender_id.eq.${contact['id']},recipient_id.eq.$_myId)')
-          .order('created_at', ascending: true);
-      }
+      final res = await _signaling.fetchHistory(contact['id'].toString(), isGroup);
 
       if (mounted) {
         setState(() {
-          _messages = List<Map<String, dynamic>>.from(res as List);
+          final List<dynamic> sorted = List.from(res);
+          // Sort messages ascending (oldest first) as chat UI expects
+          sorted.sort((a, b) => DateTime.parse(a['created_at']).compareTo(DateTime.parse(b['created_at'])));
+          _messages = List<Map<String, dynamic>>.from(sorted);
           _isLoadingMessages = false;
         });
-        debugPrint("ChatScreen: Loaded ${_messages.length} messages");
+        debugPrint("ChatScreen: Loaded ${_messages.length} messages via Signaling API Proxy");
         _scrollToBottom();
       }
     } catch (e) {
-      debugPrint("ChatScreen: Error fetching messages: $e");
+      debugPrint("ChatScreen: Error fetching messages via proxy: $e");
       if (mounted) setState(() => _isLoadingMessages = false);
     }
   }
@@ -265,36 +347,44 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _selectedContact == null) return;
 
     final isGroup = _selectedContact!['isGroup'] == true;
+    final tempId = DateTime.now().millisecondsSinceEpoch.toString();
     _messageController.clear();
 
-    try {
-      debugPrint("ChatScreen: Inserting message to DB...");
-      final res = await _supabase.from('chat_messages').insert({
-        'sender_id': _myId,
-        'tenant_id': _myTenantId,
-        if (isGroup) 'group_id': _selectedContact!['id'] else 'recipient_id': _selectedContact!['id'],
-        'content': text,
-      }).select().single();
+    // 1. Prepare local message for immediate feedback
+    final localMsg = {
+      'id': tempId,
+      'sender_id': _myId,
+      'content': text,
+      'created_at': DateTime.now().toIso8601String(),
+      'is_temp': true,
+      if (isGroup) 'group_id': _selectedContact!['id'] else 'recipient_id': _selectedContact!['id'],
+    };
 
-      final msg = res as Map<String, dynamic>;
-      debugPrint("ChatScreen: Message inserted, ID: ${msg['id']}");
-      
-      // Signaling API: Send via Socket for instant parity and log visibility
+    if (mounted) setState(() => _messages.add(localMsg));
+    _scrollToBottom();
+
+    // 2. Signaling API: Send via Socket (Crucial: Must happen even if DB fails)
+    try {
+      debugPrint("ChatScreen: Sending instruction to Signaling API...");
       _signaling.sendMessage(
-        isGroup ? _selectedContact!['id'] : _selectedContact!['id'],
+        _selectedContact!['id'],
         text,
         isGroup: isGroup,
         senderName: _myName,
         senderAvatar: _myAvatar,
-        tempId: msg['id'],
+        tempId: tempId,
       );
-      
-      if (mounted) setState(() => _messages.add(msg));
-      _scrollToBottom();
-      // Realtime will handle adding to list
-    } catch (e) {
-      debugPrint("Error sending message: $e");
+    } catch (se) {
+      debugPrint("ChatScreen Warning: Signaling API failed: $se");
     }
+
+    // 3. Persistence: The Signaling API handles DB insertion automatically using service_role.
+    // We don't need to insert from the client anymore, which avoids duplicates and RLS issues.
+    debugPrint("ChatScreen: Message delegated to server for persistence.");
+
+    // Clear the input and stop typing indicator
+    _messageController.clear();
+    _isSendingTyping = false;
   }
 
   void _scrollToBottom() {
@@ -526,7 +616,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> msg, bool isMe) {
-    final time = DateFormat('HH:mm').format(DateTime.parse(msg['created_at']));
+    final time = DateFormat('HH:mm').format(DateTime.parse(msg['created_at']).toLocal());
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
