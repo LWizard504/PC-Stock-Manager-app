@@ -28,7 +28,7 @@ class _PricingScreenState extends State<PricingScreen> {
     try {
       final response = await Supabase.instance.client
           .from('subscription_plans')
-          .select('id, name, price, features, is_active, paddle_id, billing_interval')
+          .select('id, name, price, features, is_active, is_highlighted, paddle_id, billing_interval')
           .order('price', ascending: true);
 
       if (mounted) {
@@ -45,7 +45,7 @@ class _PricingScreenState extends State<PricingScreen> {
 
   void _showEditPlanDialog(Map<String, dynamic> plan) {
     final t = Provider.of<LocaleProvider>(context, listen: false).t;
-    final priceController = TextEditingController(text: plan['price_monthly'].toString());
+    final priceController = TextEditingController(text: plan['price'].toString());
     
     showDialog(
       context: context,
@@ -83,7 +83,7 @@ class _PricingScreenState extends State<PricingScreen> {
     ToastUtils.showPromiseToast(
       context, 
       message: "Updating Protocol...", 
-      promise: Supabase.instance.client.from('subscription_plans').update({'price_monthly': newPrice}).eq('id', planId), 
+      promise: Supabase.instance.client.from('subscription_plans').update({'price': newPrice}).eq('id', planId), 
       successMessage: "Plan Updated", 
       errorMessage: "Update Failure"
     );
@@ -147,6 +147,7 @@ class _PricingScreenState extends State<PricingScreen> {
     final t = Provider.of<LocaleProvider>(context).t;
     final bool isHighlighted = plan['is_highlighted'] == true;
     final List features = plan['features'] as List? ?? [];
+    final String price = plan['price']?.toString() ?? '0';
 
     return Container(
       decoration: BoxDecoration(
