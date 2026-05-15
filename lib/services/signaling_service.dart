@@ -118,6 +118,11 @@ class SignalingService {
     });
   }
 
+  void register(String userId, List<String> groupIds) {
+    if (socket == null || !socket!.connected) return;
+    socket!.emit('register', { 'userId': userId, 'groups': groupIds });
+  }
+
   void disconnect() {
     socket?.disconnect();
     socket = null;

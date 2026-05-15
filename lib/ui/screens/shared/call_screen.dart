@@ -63,6 +63,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   void initState() {
     super.initState();
+    _isVideoMuted = !widget.isVideo;
     _initRenderers();
     _initWebrtc();
   }
@@ -137,6 +138,11 @@ class _CallScreenState extends State<CallScreen> {
       'iceServers': [
         {'urls': 'stun:stun.l.google.com:19302'},
         {'urls': 'stun:stun1.l.google.com:19302'},
+        {
+          'urls': 'turn:openrelay.metered.ca:80',
+          'username': 'openrelayproject',
+          'credential': 'openrelayproject'
+        },
       ]
     });
 
@@ -155,6 +161,7 @@ class _CallScreenState extends State<CallScreen> {
     };
 
     pc.onTrack = (event) async {
+      debugPrint("CallScreen: Received remote track: ${event.track.kind}");
       if (event.track.kind == 'video' || event.track.kind == 'audio') {
         if (!_remoteParticipants.containsKey(remoteUserId)) {
           final renderer = RTCVideoRenderer();
@@ -410,14 +417,20 @@ class _CallScreenState extends State<CallScreen> {
         borderRadius: BorderRadius.circular(24),
         child: Stack(
           children: [
-            if (!muted)
-              RTCVideoView(
-                renderer,
-                mirror: isLocal,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              )
-            else
-              Center(child: _buildAvatar(name, avatar)),
+            // Audio/Video Renderer (Must be always present for audio track playback)
+            RTCVideoView(
+              renderer,
+              mirror: isLocal,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            ),
+            // Avatar Overlay when video is muted
+            if (muted)
+              Positioned.fill(
+                child: Container(
+                  color: const Color(0xFF111111),
+                  child: Center(child: _buildAvatar(name, avatar)),
+                ),
+              ),
             
             Positioned(
               bottom: 12,

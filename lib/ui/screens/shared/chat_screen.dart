@@ -174,7 +174,7 @@ class _ChatScreenState extends State<ChatScreen> {
           allProfiles = allProfiles.where((p) {
             final pRole = (p['role'] ?? '').toString().toLowerCase();
             // Same tenant OR is an admin/superadmin
-            if (p['tenant_id'] == myTenantId) return true;
+            if (p['tenant_id'] == _myTenantId) return true;
             if (pRole == 'admin' || pRole == 'superadmin') return true;
             return false;
           }).toList();
