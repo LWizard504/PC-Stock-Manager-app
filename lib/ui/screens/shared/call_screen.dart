@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -22,7 +23,10 @@ class Participant {
     required this.renderer,
     this.isVideoEnabled = true,
     this.isAudioEnabled = true,
+    this.signalQuality = 100,
   });
+
+  int signalQuality;
 }
 
 class CallScreen extends StatefulWidget {
@@ -47,7 +51,7 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends State<CallScreen> {
+class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final _localRenderer = RTCVideoRenderer();
   final Map<String, RTCPeerConnection> _peerConnections = {};
   final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
@@ -62,12 +66,37 @@ class _CallScreenState extends State<CallScreen> {
   final _signaling = SignalingService();
   final _supabase = Supabase.instance.client;
 
+  // Neural Aesthetics & Animation
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  String _callStatus = 'connecting';
+  DateTime? _callStartTime;
+  Timer? _statsTimer;
+
   @override
   void initState() {
     super.initState();
     _isVideoMuted = !widget.isVideo;
+    
+    // Pulse Animation for Incoming Calls
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeOut),
+    );
+
     _initRenderers();
     _initWebrtc();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _stopStatsTimer();
+    super.dispose();
   }
 
   Future<void> _initRenderers() async {
@@ -127,7 +156,12 @@ class _CallScreenState extends State<CallScreen> {
         final answer = payload['answer'];
         final desc = RTCSessionDescription(answer['sdp'], answer['type']);
         await _peerConnections[senderId]?.setRemoteDescription(desc);
-        if (mounted) setState(() => _inCall = true);
+        if (mounted) setState(() {
+          _inCall = true;
+          _callStatus = 'Conexión Segura';
+          _callStartTime = DateTime.now();
+          _startStatsTimer();
+        });
       }
     };
 
@@ -136,7 +170,7 @@ class _CallScreenState extends State<CallScreen> {
       if (widget.isGroup) {
         _removeParticipant(senderId);
       } else {
-        _endCall(sendSignal: false);
+        _endCall(sendSignal: false, reason: _inCall ? "Llamada finalizada" : "Llamada rechazada");
       }
     };
 
@@ -208,6 +242,7 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _initiateCall() async {
+    setState(() => _callStatus = 'Estableciendo Señal...');
     final myId = _supabase.auth.currentUser?.id;
     if (myId == null) return;
 
@@ -318,11 +353,37 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
-  void _endCall({bool sendSignal = true}) {
+  void _endCall({bool sendSignal = true, String? reason}) async {
+    if (!mounted) return;
+
+    String? formattedDuration;
+    if (_callStartTime != null) {
+      final duration = DateTime.now().difference(_callStartTime!);
+      formattedDuration = "${duration.inMinutes}:${(duration.inSeconds % 60).toString().padStart(2, '0')}";
+    }
+
+    setState(() {
+      _callStatus = reason ?? 'Llamada finalizada';
+      _inCall = false;
+      _stopStatsTimer();
+    });
+
     if (sendSignal) {
-      final myId = _supabase.auth.currentUser?.id;
+      final user = _supabase.auth.currentUser;
+      final myId = user?.id;
+      final myName = user?.userMetadata?['full_name'] ?? user?.email;
+      final tenantId = user?.userMetadata?['tenant_id'];
+
       _peerConnections.keys.forEach((targetId) {
-        _signaling.sendHangup(targetId, myId!);
+        _signaling.sendHangup(
+          targetId, 
+          myId!, 
+          senderName: myName,
+          status: _callStartTime != null ? 'completed' : 'rejected',
+          duration: formattedDuration,
+          tenantId: tenantId,
+          isGroup: widget.isGroup
+        );
       });
     }
     
@@ -336,6 +397,7 @@ class _CallScreenState extends State<CallScreen> {
     });
     _remoteParticipants.values.forEach((p) => p.renderer.dispose());
     
+    await Future.delayed(const Duration(milliseconds: 1500));
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -411,16 +473,26 @@ class _CallScreenState extends State<CallScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildAvatar(widget.contact['full_name'] ?? widget.contact['name'], widget.contact['avatar_url'] ?? widget.contact['avatar'], radius: 60),
-            const SizedBox(height: 24),
-            Text(
-              widget.contact['full_name'] ?? widget.contact['name'] ?? 'Iniciando...',
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+            _buildAvatar(
+              widget.contact['full_name'] ?? widget.contact['name'], 
+              widget.contact['avatar_url'] ?? widget.contact['avatar'], 
+              radius: 60,
+              borderColor: const Color(0xFFEAB308).withOpacity(0.3),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 32),
             Text(
-              widget.isGroup ? "Conectando al Cluster..." : "Llamando...",
-              style: TextStyle(fontSize: 16, color: Colors.white.withOpacity(0.5)),
+              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
+              style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: -1),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _callStatus.toUpperCase(),
+              style: GoogleFonts.outfit(
+                color: const Color(0xFFEAB308), 
+                fontWeight: FontWeight.black, 
+                fontSize: 10, 
+                letterSpacing: 4,
+              ),
             ),
           ],
         ),
@@ -463,14 +535,14 @@ class _CallScreenState extends State<CallScreen> {
               return _buildVideoCard("Tú", _localRenderer, _isVideoMuted, isLocal: true);
             }
             final p = participants[index - 1];
-            return _buildVideoCard(p.name, p.renderer, !p.isVideoEnabled, avatar: p.avatar);
+            return _buildVideoCard(p.name, p.renderer, !p.isVideoEnabled, avatar: p.avatar, signalQuality: p.signalQuality);
           },
         );
       },
     );
   }
 
-  Widget _buildVideoCard(String name, RTCVideoRenderer renderer, bool muted, {bool isLocal = false, String? avatar}) {
+  Widget _buildVideoCard(String name, RTCVideoRenderer renderer, bool muted, {bool isLocal = false, String? avatar, int signalQuality = 100}) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF111111),
@@ -496,6 +568,8 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
             
+            if (!isLocal) _buildSignalIndicator(signalQuality),
+            
             Positioned(
               bottom: 12,
               left: 12,
@@ -506,8 +580,8 @@ class _CallScreenState extends State<CallScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  name,
-                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                  name.toUpperCase(),
+                  style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: 1),
                 ),
               ),
             ),
@@ -517,40 +591,115 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  Widget _buildAvatar(String? name, String? url, {double radius = 40}) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: const Color(0xFF222222),
-      backgroundImage: url != null ? NetworkImage(url) : null,
-      child: url == null ? Text(name?[0] ?? 'U', style: TextStyle(fontSize: radius * 0.8, color: Colors.white24)) : null,
+  Widget _buildSignalIndicator(int quality) {
+    return Positioned(
+      top: 12,
+      right: 12,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: List.generate(4, (index) {
+            final barHeight = (index + 1) * 3.0;
+            final isActive = quality >= (index + 1) * 25;
+            return Container(
+              margin: const EdgeInsets.only(left: 2),
+              width: 3,
+              height: barHeight,
+              decoration: BoxDecoration(
+                color: isActive ? Colors.green : Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(1),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(String? name, String? url, {double radius = 40, Color? borderColor}) {
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: borderColor != null ? Border.all(color: borderColor, width: 2) : null,
+      ),
+      child: CircleAvatar(
+        radius: radius,
+        backgroundColor: const Color(0xFF080808),
+        backgroundImage: url != null ? NetworkImage(url) : null,
+        child: url == null ? Text(
+          name?[0].toUpperCase() ?? 'N', 
+          style: GoogleFonts.outfit(fontSize: radius * 0.8, color: Colors.white.withOpacity(0.1), fontWeight: FontWeight.black)
+        ) : null,
+      ),
     );
   }
 
   Widget _buildIncomingOverlay() {
+    const saasYellow = Color(0xFFEAB308);
+    const industrialRed = Color(0xFFFF0000);
+    const pureBlack = Color(0xFF050505);
+
     return Container(
-      color: Colors.black.withOpacity(0.9),
+      color: pureBlack.withOpacity(0.98),
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildAvatar(widget.contact['full_name'] ?? widget.contact['name'], widget.contact['avatar_url'] ?? widget.contact['avatar'], radius: 80),
-            const SizedBox(height: 32),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedBuilder(
+                  animation: _pulseAnimation,
+                  builder: (context, child) {
+                    return Container(
+                      width: 160 * _pulseAnimation.value,
+                      height: 160 * _pulseAnimation.value,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: saasYellow.withOpacity(0.3 * (1.5 - _pulseAnimation.value)),
+                          width: 4,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                _buildAvatar(
+                  widget.contact['full_name'] ?? widget.contact['name'], 
+                  widget.contact['avatar_url'] ?? widget.contact['avatar'], 
+                  radius: 80,
+                  borderColor: saasYellow,
+                ),
+              ],
+            ),
+            const SizedBox(height: 48),
             Text(
-              widget.contact['full_name'] ?? widget.contact['name'] ?? 'Desconocido',
-              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
+              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
+              style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: -1),
             ),
             const SizedBox(height: 8),
             Text(
-              widget.isGroup ? "Invitación a Cluster" : "Llamada Entrante",
-              style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, letterSpacing: 2),
+              (widget.isGroup ? "CLUSTER CONNECTION REQUEST" : "INCOMING SECURE SIGNAL").toUpperCase(),
+              style: GoogleFonts.outfit(
+                color: saasYellow, 
+                fontWeight: FontWeight.black, 
+                fontSize: 10, 
+                letterSpacing: 4,
+              ),
             ),
-            const SizedBox(height: 64),
+            const SizedBox(height: 80),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildRoundButton(LucideIcons.phone, Colors.green, _acceptCall, size: 80),
-                const SizedBox(width: 48),
-                _buildRoundButton(LucideIcons.phoneOff, Colors.red, () => _endCall(sendSignal: true), size: 80),
+                _buildRoundButton(Icons.phone, Colors.green, _acceptCall, size: 84, glowColor: Colors.green.withOpacity(0.4)),
+                const SizedBox(width: 64),
+                _buildRoundButton(Icons.phone_off, industrialRed, () => _endCall(sendSignal: true), size: 84, glowColor: industrialRed.withOpacity(0.4)),
               ],
             )
           ],
@@ -563,31 +712,34 @@ class _CallScreenState extends State<CallScreen> {
     if (widget.isIncoming && !_inCall) return const SizedBox();
 
     return Positioned(
-      bottom: 32,
+      bottom: 40,
       left: 0,
       right: 0,
       child: Center(
         child: ClipRRect(
           borderRadius: BorderRadius.circular(40),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A1A1A).withOpacity(0.7),
+                color: const Color(0xFF080808).withOpacity(0.8),
                 borderRadius: BorderRadius.circular(40),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 40, spreadRadius: -10),
+                ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildRoundButton(_isMicMuted ? LucideIcons.micOff : LucideIcons.mic, 
-                      _isMicMuted ? Colors.red : Colors.white10, _toggleMic),
-                  const SizedBox(width: 16),
-                  _buildRoundButton(_isVideoMuted ? LucideIcons.videoOff : LucideIcons.video, 
-                      _isVideoMuted ? Colors.red : Colors.white10, _toggleVideo),
-                  const SizedBox(width: 16),
-                  _buildRoundButton(LucideIcons.phoneOff, Colors.red, () => _endCall(sendSignal: true), isLarge: true),
+                  _buildRoundButton(_isMicMuted ? Icons.mic_off : Icons.mic, 
+                      _isMicMuted ? Colors.red : Colors.white.withOpacity(0.05), _toggleMic),
+                  const SizedBox(width: 20),
+                  _buildRoundButton(_isVideoMuted ? Icons.video_off : Icons.video_call, 
+                      _isVideoMuted ? Colors.red : Colors.white.withOpacity(0.05), _toggleVideo),
+                  const SizedBox(width: 20),
+                  _buildRoundButton(Icons.phone_off, const Color(0xFFFF0000), () => _endCall(sendSignal: true), isLarge: true, glowColor: Colors.red.withOpacity(0.3)),
                 ],
               ),
             ),
@@ -597,8 +749,8 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  Widget _buildRoundButton(IconData icon, Color bg, VoidCallback onTap, {bool isLarge = false, double? size}) {
-    double s = size ?? (isLarge ? 64 : 52);
+  Widget _buildRoundButton(IconData icon, Color bg, VoidCallback onTap, {bool isLarge = false, double? size, Color? glowColor}) {
+    double s = size ?? (isLarge ? 72 : 56);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -607,9 +759,40 @@ class _CallScreenState extends State<CallScreen> {
         decoration: BoxDecoration(
           color: bg,
           shape: BoxShape.circle,
+          boxShadow: glowColor != null ? [
+            BoxShadow(color: glowColor, blurRadius: 20, spreadRadius: 0),
+          ] : null,
         ),
-        child: Icon(icon, color: Colors.white, size: s * 0.45),
+        child: Icon(icon, color: Colors.white, size: s * 0.4),
       ),
     );
+  }
+
+  void _startStatsTimer() {
+    _statsTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+      for (var entry in _peerConnections.entries) {
+        try {
+          final stats = await entry.value.getStats();
+          for (var report in stats) {
+            if (report.type == 'candidate-pair' && report.values['state'] == 'succeeded') {
+              final rtt = report.values['currentRoundTripTime'] ?? 0;
+              final q = (100 - (rtt * 1000) / 2).clamp(0, 100).toInt();
+              if (mounted) {
+                setState(() {
+                  if (_remoteParticipants.containsKey(entry.key)) {
+                    _remoteParticipants[entry.key]!.signalQuality = q;
+                  }
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    });
+  }
+
+  void _stopStatsTimer() {
+    _statsTimer?.cancel();
+    _statsTimer = null;
   }
 }

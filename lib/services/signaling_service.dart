@@ -172,11 +172,16 @@ class SignalingService {
     });
   }
 
-  void sendHangup(String to, String fromId) {
+  void sendHangup(String to, String fromId, {String? senderName, String? status, String? duration, String? tenantId, bool isGroup = false}) {
     if (socket == null || !socket!.connected) return;
     socket!.emit('hangup', {
       'to': to,
       'from': fromId,
+      'senderName': senderName,
+      'status': status,
+      'duration': duration,
+      'tenantId': tenantId,
+      'isGroup': isGroup
     });
   }
   void sendTyping(String to, bool isTyping, {bool isAudio = false, bool isGroup = false}) {
