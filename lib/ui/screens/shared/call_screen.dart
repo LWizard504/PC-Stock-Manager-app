@@ -291,7 +291,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     final offer = await pc.createOffer(constraints);
     await pc.setLocalDescription(offer);
 
-    _sendSignal('call-offer', {
+    _sendSignal('offer', {
       'offer': {'sdp': offer.sdp, 'type': offer.type},
       'roomId': widget.roomId,
       'type': widget.isVideo ? 'video' : 'voice',
@@ -342,7 +342,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     final answer = await pc.createAnswer(constraints);
     await pc.setLocalDescription(answer);
 
-    _sendSignal('call-answer', {
+    _sendSignal('answer', {
       'answer': {'sdp': answer.sdp, 'type': answer.type},
       'roomId': widget.roomId,
       'isGroup': widget.isGroup,
