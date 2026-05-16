@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
@@ -160,7 +161,7 @@ class _UsersScreenState extends State<UsersScreen> {
       final supabase = Supabase.instance.client;
       
       // Neural Protocol: Use an isolated client to avoid session hijacking
-      final tempClient = SupabaseClient(supabase.supabaseUrl, supabase.supabaseKey);
+      final tempClient = SupabaseClient(AppConfig.supabaseUrl, AppConfig.supabaseAnonKey);
       
       final myProfileResponse = await supabase.from('profiles').select('tenant_id').eq('id', supabase.auth.currentUser!.id).single();
       final tenantId = myProfileResponse['tenant_id'];

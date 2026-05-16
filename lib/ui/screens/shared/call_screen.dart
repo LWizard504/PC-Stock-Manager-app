@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
 import 'package:pc_dev_flutter/services/config.dart';
 
@@ -52,6 +53,9 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
+  static const saasYellow = Color(0xFFEAB308);
+  static const industrialRed = Color(0xFFFF0000);
+  static const pureBlack = Color(0xFF050505);
   final _localRenderer = RTCVideoRenderer();
   final Map<String, RTCPeerConnection> _peerConnections = {};
   final Map<String, List<RTCIceCandidate>> _pendingCandidates = {};
@@ -72,7 +76,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   String _callStatus = 'connecting';
   DateTime? _callStartTime;
-  Timer? _statsTimer;
+  Timer? _neuralTelemetryTimer;
 
   @override
   void initState() {
@@ -96,6 +100,22 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   void dispose() {
     _pulseController.dispose();
     _stopStatsTimer();
+    
+    // Neural Node Cleanup: Prevent signaling callbacks from firing on disposed screen
+    _signaling.onSignal = null;
+    _signaling.onHangup = null;
+    
+    _localStream?.getTracks().forEach((t) => t.stop());
+    _peerConnections.values.forEach((pc) {
+      try {
+        pc.close();
+      } catch (e) {
+        debugPrint("Error closing peer connection: $e");
+      }
+    });
+    _remoteParticipants.values.forEach((p) => p.renderer.dispose());
+
+    _localRenderer.dispose();
     super.dispose();
   }
 
@@ -359,7 +379,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     String? formattedDuration;
     if (_callStartTime != null) {
       final duration = DateTime.now().difference(_callStartTime!);
-      formattedDuration = "${duration.inMinutes}:${(duration.inSeconds % 60).toString().padStart(2, '0')}";
+      formattedDuration = "${duration.inMinutes}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}";
     }
 
     setState(() {
@@ -419,25 +439,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     }
   }
 
-  @override
-  void dispose() {
-    // Neural Node Cleanup: Prevent signaling callbacks from firing on disposed screen
-    _signaling.onSignal = null;
-    _signaling.onHangup = null;
-    
-    _localStream?.getTracks().forEach((t) => t.stop());
-    _peerConnections.values.forEach((pc) {
-      try {
-        pc.close();
-      } catch (e) {
-        debugPrint("Error closing peer connection: $e");
-      }
-    });
-    _remoteParticipants.values.forEach((p) => p.renderer.dispose());
 
-    _localRenderer.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -482,14 +484,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             const SizedBox(height: 32),
             Text(
               (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
-              style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: -1),
+              style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
             ),
             const SizedBox(height: 12),
             Text(
               _callStatus.toUpperCase(),
               style: GoogleFonts.outfit(
                 color: const Color(0xFFEAB308), 
-                fontWeight: FontWeight.black, 
+                fontWeight: FontWeight.w900, 
                 fontSize: 10, 
                 letterSpacing: 4,
               ),
@@ -581,7 +583,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
                 ),
                 child: Text(
                   name.toUpperCase(),
-                  style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: 1),
+                  style: GoogleFonts.outfit(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1),
                 ),
               ),
             ),
@@ -634,16 +636,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         backgroundImage: url != null ? NetworkImage(url) : null,
         child: url == null ? Text(
           name?[0].toUpperCase() ?? 'N', 
-          style: GoogleFonts.outfit(fontSize: radius * 0.8, color: Colors.white.withOpacity(0.1), fontWeight: FontWeight.black)
+          style: GoogleFonts.outfit(fontSize: radius * 0.8, color: Colors.white.withOpacity(0.1), fontWeight: FontWeight.w900)
         ) : null,
       ),
     );
   }
 
   Widget _buildIncomingOverlay() {
-    const saasYellow = Color(0xFFEAB308);
-    const industrialRed = Color(0xFFFF0000);
-    const pureBlack = Color(0xFF050505);
+
 
     return Container(
       color: pureBlack.withOpacity(0.98),
@@ -681,14 +681,14 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             const SizedBox(height: 48),
             Text(
               (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
-              style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.black, color: Colors.white, letterSpacing: -1),
+              style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
             ),
             const SizedBox(height: 8),
             Text(
               (widget.isGroup ? "CLUSTER CONNECTION REQUEST" : "INCOMING SECURE SIGNAL").toUpperCase(),
               style: GoogleFonts.outfit(
                 color: saasYellow, 
-                fontWeight: FontWeight.black, 
+                fontWeight: FontWeight.w900, 
                 fontSize: 10, 
                 letterSpacing: 4,
               ),
@@ -699,7 +699,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               children: [
                 _buildRoundButton(Icons.phone, Colors.green, _acceptCall, size: 84, glowColor: Colors.green.withOpacity(0.4)),
                 const SizedBox(width: 64),
-                _buildRoundButton(Icons.phone_off, industrialRed, () => _endCall(sendSignal: true), size: 84, glowColor: industrialRed.withOpacity(0.4)),
+                _buildRoundButton(LucideIcons.phoneOff, industrialRed, () => _endCall(sendSignal: true), size: 84, glowColor: industrialRed.withOpacity(0.4)),
               ],
             )
           ],
@@ -733,13 +733,13 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildRoundButton(_isMicMuted ? Icons.mic_off : Icons.mic, 
+                  _buildRoundButton(_isMicMuted ? LucideIcons.micOff : Icons.mic, 
                       _isMicMuted ? Colors.red : Colors.white.withOpacity(0.05), _toggleMic),
                   const SizedBox(width: 20),
-                  _buildRoundButton(_isVideoMuted ? Icons.video_off : Icons.video_call, 
+                  _buildRoundButton(_isVideoMuted ? LucideIcons.videoOff : LucideIcons.video, 
                       _isVideoMuted ? Colors.red : Colors.white.withOpacity(0.05), _toggleVideo),
                   const SizedBox(width: 20),
-                  _buildRoundButton(Icons.phone_off, const Color(0xFFFF0000), () => _endCall(sendSignal: true), isLarge: true, glowColor: Colors.red.withOpacity(0.3)),
+                  _buildRoundButton(LucideIcons.phoneOff, const Color(0xFFFF0000), () => _endCall(sendSignal: true), isLarge: true, glowColor: Colors.red.withOpacity(0.3)),
                 ],
               ),
             ),
@@ -769,7 +769,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _startStatsTimer() {
-    _statsTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+    _neuralTelemetryTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       for (var entry in _peerConnections.entries) {
         try {
           final stats = await entry.value.getStats();
@@ -792,7 +792,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _stopStatsTimer() {
-    _statsTimer?.cancel();
-    _statsTimer = null;
+    _neuralTelemetryTimer?.cancel();
+    _neuralTelemetryTimer = null;
   }
 }
