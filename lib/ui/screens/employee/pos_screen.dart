@@ -18,14 +18,26 @@ class _POSScreenState extends State<POSScreen> {
   String _selectedCategory = 'All';
   List<Map<String, dynamic>> _cart = [];
   bool _isLoadingProducts = true;
+  bool _isProcessing = false;
   List<Map<String, dynamic>> _products = [];
   Map<String, dynamic>? _myProfile;
   List<String> _categories = ['All'];
+  
+  String? _selectedItemId;
+  RealtimeChannel? _channel;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _fetchInitialData();
+  }
+
+  @override
+  void dispose() {
+    _channel?.unsubscribe();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchInitialData() async {
@@ -35,27 +47,64 @@ class _POSScreenState extends State<POSScreen> {
       if (user == null) return;
 
       _myProfile = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      
+      _setupRealtime();
       await _fetchProducts();
     } catch (e) {
       debugPrint("POS Data Error: $e");
     }
   }
 
+  void _setupRealtime() {
+    final supabase = Supabase.instance.client;
+    _channel = supabase.channel('employee-pos-products');
+    _channel!
+      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'products', callback: (payload) => _fetchProducts())
+      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'inventory', callback: (payload) => _fetchProducts())
+      .subscribe();
+  }
+
   Future<void> _fetchProducts() async {
+    if (!mounted) return;
+    setState(() => _isLoadingProducts = true);
+    
     try {
       final supabase = Supabase.instance.client;
       final tenantId = _myProfile?['tenant_id'];
+      String? currentBranchId = _myProfile?['branch_id'];
 
-      var query = supabase.from('products').select().eq('is_active', true);
+      if (currentBranchId == null && tenantId != null) {
+        final fallbackBranch = await supabase.from('branches').select('id').eq('tenant_id', tenantId).order('created_at', ascending: true).limit(1).maybeSingle();
+        currentBranchId = fallbackBranch?['id'] as String?;
+      }
+
+      if (currentBranchId == null) {
+        if (mounted) setState(() { _products = []; _isLoadingProducts = false; });
+        return;
+      }
+
+      var query = supabase.from('products').select('*, inventory(stock_level, branch_id)').eq('is_active', true);
       if (tenantId != null) query = query.eq('tenant_id', tenantId);
 
       final response = await query;
       if (mounted) {
         final products = List<Map<String, dynamic>>.from(response);
         final cats = {'All'};
+        
         for (var p in products) {
           final meta = p['metadata'] as Map<String, dynamic>? ?? {};
           if (meta.containsKey('category')) cats.add(meta['category']);
+          
+          int stock = 0;
+          if (p['inventory'] != null && p['inventory'] is List) {
+            for (var inv in p['inventory']) {
+              if (inv['branch_id'] == currentBranchId) {
+                stock = (inv['stock_level'] as num?)?.toInt() ?? 0;
+                break;
+              }
+            }
+          }
+          p['stock'] = stock;
         }
 
         setState(() {
@@ -65,56 +114,134 @@ class _POSScreenState extends State<POSScreen> {
         });
       }
     } catch (e) {
+      debugPrint("Fetch Error: $e");
       if (mounted) setState(() => _isLoadingProducts = false);
     }
   }
 
   void _addToCart(Map<String, dynamic> product) {
+    final stock = product['stock'] as int? ?? 0;
     setState(() {
       final existingIndex = _cart.indexWhere((item) => item['id'] == product['id']);
       if (existingIndex >= 0) {
-        _cart[existingIndex]['qty']++;
+        if (_cart[existingIndex]['qty'] < stock) {
+          _cart[existingIndex]['qty']++;
+        } else {
+          ToastUtils.showErrorToast(context, "Stock insuficiente ($stock disponibles)");
+        }
       } else {
-        _cart.add({...product, 'qty': 1});
+        if (stock > 0) {
+          _cart.add({...product, 'qty': 1});
+        } else {
+          ToastUtils.showErrorToast(context, "Stock insuficiente (0 disponibles)");
+        }
+      }
+      _selectedItemId = product['id'];
+    });
+  }
+
+  void _updateQuantity(String id, int newQty) {
+    setState(() {
+      final index = _cart.indexWhere((c) => c['id'] == id);
+      if (index < 0) return;
+      
+      final product = _products.firstWhere((p) => p['id'] == id, orElse: () => {});
+      final stock = product['stock'] as int? ?? 0;
+      
+      if (newQty > stock) {
+        ToastUtils.showErrorToast(context, "Stock insuficiente ($stock disponibles)");
+        return;
+      }
+      
+      if (newQty <= 0) {
+         _cart.removeAt(index);
+         if (_selectedItemId == id) _selectedItemId = null;
+      } else {
+         _cart[index]['qty'] = newQty;
       }
     });
   }
 
-  void _updateQuantity(int index, int delta) {
+  void _handleNumpad(String val) {
+    if (_selectedItemId == null) return;
+    
     setState(() {
-      _cart[index]['qty'] += delta;
-      if (_cart[index]['qty'] <= 0) _cart.removeAt(index);
+      final index = _cart.indexWhere((c) => c['id'] == _selectedItemId);
+      if (index < 0) return;
+      
+      int currentQty = _cart[index]['qty'];
+      
+      if (val == '⌫') {
+        String currentQtyStr = currentQty.toString();
+        if (currentQtyStr.length > 1 && currentQty != 0) {
+          _updateQuantity(_selectedItemId!, int.parse(currentQtyStr.substring(0, currentQtyStr.length - 1)));
+        } else if (currentQty > 0) {
+          _updateQuantity(_selectedItemId!, 0);
+        } else {
+          _cart.removeAt(index);
+          _selectedItemId = null;
+        }
+      } else {
+        String currentQtyStr = currentQty == 0 ? "" : currentQty.toString();
+        int newQty = int.parse(currentQtyStr + val);
+        _updateQuantity(_selectedItemId!, newQty);
+      }
     });
   }
+  
+  void _handleSearchSubmit(String val) {
+    if (val.trim().isEmpty) return;
+    final matchIndex = _products.indexWhere((p) => 
+       (p['sku']?.toString().toLowerCase() == val.toLowerCase()) || 
+       (p['name']?.toString().toLowerCase() == val.toLowerCase())
+    );
+    
+    if (matchIndex >= 0) {
+       _addToCart(_products[matchIndex]);
+       ToastUtils.showSuccessToast(context, "Agregado: ${_products[matchIndex]['name']}");
+       _searchController.clear();
+    } else {
+       ToastUtils.showErrorToast(context, "Producto no encontrado");
+    }
+  }
 
-  double get _subtotal => _cart.fold(0, (sum, item) => sum + (item['price'] * item['qty']));
+  double get _subtotal {
+    return _cart.where((c) => c['qty'] > 0).fold(0, (sum, item) => sum + (item['price'] * item['qty']));
+  }
   double get _tax => _subtotal * 0.15;
   double get _total => _subtotal + _tax;
 
   Future<void> _processCheckout() async {
-    if (_cart.isEmpty) return;
-    final t = Provider.of<LocaleProvider>(context, listen: false).t;
-
+    final activeCart = _cart.where((c) => c['qty'] > 0).toList();
+    if (activeCart.isEmpty || _total <= 0) return;
+    
+    setState(() => _isProcessing = true);
+    
     ToastUtils.showPromiseToast(
       context, 
-      message: "Authorizing Payment...", 
-      promise: _executeCheckout(), 
-      successMessage: "Transaction Complete", 
-      errorMessage: "Payment Protocol Error"
+      message: "Procesando Venta...", 
+      promise: _executeCheckout(activeCart), 
+      successMessage: "Transacción Completada", 
+      errorMessage: "Error en el proceso"
     );
   }
 
-  Future<void> _executeCheckout() async {
+  Future<void> _executeCheckout(List<Map<String, dynamic>> activeCart) async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) throw Exception("No auth");
 
       final tenantId = _myProfile?['tenant_id'];
-      final branchId = _myProfile?['branch_id'];
+      String? branchId = _myProfile?['branch_id'];
+
+      if (branchId == null && tenantId != null) {
+        final fallbackBranch = await Supabase.instance.client.from('branches').select('id').eq('tenant_id', tenantId).order('created_at', ascending: true).limit(1).maybeSingle();
+        branchId = fallbackBranch?['id'] as String?;
+      }
 
       if (tenantId == null || branchId == null) throw Exception("Identity Mismatch");
 
-      final itemsJson = _cart.map((item) => {
+      final itemsJson = activeCart.map((item) => {
         'id': item['id'],
         'qty': item['qty'],
         'price': item['price']
@@ -128,8 +255,15 @@ class _POSScreenState extends State<POSScreen> {
         'p_items': itemsJson
       });
 
-      if (mounted) setState(() => _cart.clear());
-    } catch (e) { rethrow; }
+      if (mounted) setState(() {
+         _cart.clear();
+         _selectedItemId = null;
+         _isProcessing = false;
+      });
+    } catch (e) { 
+      if (mounted) setState(() => _isProcessing = false);
+      rethrow; 
+    }
   }
 
   @override
@@ -174,19 +308,52 @@ class _POSScreenState extends State<POSScreen> {
             Text(_myProfile?['full_name']?.toString().toUpperCase() ?? "OPERATIVE UNIT", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.5)),
           ],
         ),
-        SizedBox(
-          width: 300,
-          child: TextField(
-            decoration: InputDecoration(
-              hintText: "SCAN SKU / SEARCH...",
-              hintStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1, color: Colors.white10),
-              prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
-              filled: true,
-              fillColor: AppTheme.surfaceDark,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+        Row(
+          children: [
+            SizedBox(
+              width: 300,
+              child: TextField(
+                controller: _searchController,
+                onSubmitted: _handleSearchSubmit,
+                decoration: InputDecoration(
+                  hintText: "SCAN SKU / SEARCH...",
+                  hintStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1, color: Colors.white10),
+                  prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
+                  filled: true,
+                  fillColor: AppTheme.surfaceDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                ),
+              ),
             ),
-          ),
-        ),
+            const SizedBox(width: 12),
+            ElevatedButton.icon(
+              onPressed: () {}, // Handled by search field focus usually
+              icon: const Icon(LucideIcons.scan, size: 14),
+              label: const Text("SCANNER"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.surfaceDark,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)
+              ),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton.icon(
+              onPressed: _fetchProducts,
+              icon: _isLoadingProducts ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.red, strokeWidth: 2)) : const Icon(LucideIcons.refreshCw, size: 14),
+              label: const Text("ACTUALIZAR"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.withOpacity(0.1),
+                foregroundColor: Colors.red,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)
+              ),
+            ),
+          ],
+        )
       ],
     ).animate().fadeIn().slideY(begin: -0.2);
   }
@@ -272,7 +439,13 @@ class _POSScreenState extends State<POSScreen> {
                 children: [
                   Text(product['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11, letterSpacing: 0.5), maxLines: 1, overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
-                  Text("\$${product['price'].toStringAsFixed(2)}", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -1)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text("\$${product['price'].toStringAsFixed(2)}", style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 20, letterSpacing: -1)),
+                      Text("${product['stock']}x", style: const TextStyle(color: Colors.white24, fontWeight: FontWeight.w900, fontSize: 10)),
+                    ]
+                  )
                 ],
               ),
             ),
@@ -293,6 +466,7 @@ class _POSScreenState extends State<POSScreen> {
         children: [
           _buildCartHeader(t),
           Expanded(child: _buildCartItems()),
+          if (_selectedItemId != null) _buildNumpad(),
           _buildCartTotals(t),
         ],
       ),
@@ -308,14 +482,18 @@ class _POSScreenState extends State<POSScreen> {
           const SizedBox(width: 16),
           const Text("TRANSACTION BUFFER", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1)),
           const Spacer(),
-          Text("${_cart.length} UNIT(S)", style: const TextStyle(color: Colors.white24, fontSize: 10, fontWeight: FontWeight.w900)),
+          IconButton(
+            icon: const Icon(LucideIcons.trash2, size: 16, color: Colors.white38),
+            onPressed: () => setState(() { _cart.clear(); _selectedItemId = null; }),
+          )
         ],
       ),
     );
   }
 
   Widget _buildCartItems() {
-    if (_cart.isEmpty) {
+    final activeCart = _cart.where((c) => c['qty'] > 0).toList();
+    if (activeCart.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -329,36 +507,89 @@ class _POSScreenState extends State<POSScreen> {
     }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      itemCount: _cart.length,
+      itemCount: activeCart.length,
       itemBuilder: (context, index) {
-        final item = _cart[index];
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.01), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item['name'].toString().toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
-                    Text("\$${item['price']}", style: const TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
-                  ],
+        final item = activeCart[index];
+        final isSelected = _selectedItemId == item['id'];
+        
+        return InkWell(
+          onTap: () => setState(() => _selectedItemId = item['id']),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isSelected ? Colors.red.withOpacity(0.1) : Colors.white.withOpacity(0.01), 
+              borderRadius: BorderRadius.circular(16), 
+              border: Border.all(color: isSelected ? Colors.red.withOpacity(0.5) : Colors.white10)
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item['name'].toString().toUpperCase(), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 11, color: isSelected ? Colors.red : Colors.white)),
+                      Text("\$${item['price']}", style: const TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
                 ),
-              ),
-              Row(
-                children: [
-                  IconButton(icon: const Icon(LucideIcons.minus, size: 14), onPressed: () => _updateQuantity(index, -1)),
-                  Text("${item['qty']}", style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
-                  IconButton(icon: const Icon(LucideIcons.plus, size: 14, color: Colors.red), onPressed: () => _updateQuantity(index, 1)),
-                ],
-              ),
-            ],
+                Text("${item['qty']}x", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: isSelected ? Colors.red : Colors.white)),
+              ],
+            ),
           ),
         );
       },
     );
+  }
+
+  Widget _buildNumpad() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      decoration: const BoxDecoration(
+        color: AppTheme.surfaceDark,
+        border: Border(top: BorderSide(color: Colors.white10))
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("EDIT QUANTITY", style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Colors.white38, letterSpacing: 1)),
+              IconButton(
+                icon: const Icon(LucideIcons.x, size: 14, color: Colors.white54),
+                onPressed: () => setState(() => _selectedItemId = null),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              )
+            ],
+          ),
+          const SizedBox(height: 12),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            childAspectRatio: 2,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              ...['1','2','3','4','5','6','7','8','9','0','⌫'].map((num) => 
+                ElevatedButton(
+                  onPressed: () => _handleNumpad(num),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.05),
+                    foregroundColor: num == '⌫' ? Colors.red : Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                  ),
+                  child: Text(num, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+                )
+              ),
+            ],
+          ),
+        ],
+      )
+    ).animate().slideY(begin: 1, end: 0, duration: 200.ms);
   }
 
   Widget _buildCartTotals(String Function(String) t) {
@@ -377,9 +608,11 @@ class _POSScreenState extends State<POSScreen> {
             width: double.infinity,
             height: 64,
             child: ElevatedButton(
-              onPressed: _cart.isEmpty ? null : _processCheckout,
+              onPressed: (_cart.where((c) => c['qty'] > 0).isEmpty || _isProcessing) ? null : _processCheckout,
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-              child: Text(t('pos_checkout'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 2)),
+              child: _isProcessing 
+                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                : Text(t('pos_checkout'), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 2)),
             ),
           ),
         ],
@@ -397,4 +630,3 @@ class _POSScreenState extends State<POSScreen> {
     );
   }
 }
-

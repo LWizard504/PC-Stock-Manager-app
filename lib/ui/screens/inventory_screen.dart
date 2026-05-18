@@ -15,14 +15,23 @@ class InventoryScreen extends StatefulWidget {
 class _InventoryScreenState extends State<InventoryScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _inventoryItems = [];
+  List<Map<String, dynamic>> _filteredItems = [];
   List<Map<String, dynamic>> _branches = [];
   String _title = "Cargando...";
   Map<String, dynamic>? _myProfile;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _searchController.addListener(_filterInventory);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _loadData() {
@@ -36,6 +45,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _fetchInventory() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
@@ -50,16 +61,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final role = _myProfile!['role'] as String;
       final tenantId = _myProfile!['tenant_id'];
 
-      // Fetch branches for inventory initialization
-      final branchesRes = await supabase.from('branches').select('*').eq('tenant_id', tenantId!);
+      // Fetch branches deterministically
+      final branchesRes = await supabase.from('branches').select('*').eq('tenant_id', tenantId).order('created_at', ascending: true);
       _branches = List<Map<String, dynamic>>.from(branchesRes);
 
       var query = supabase.from('products').select('*, inventory(*)');
 
       if (role == 'superadmin' || role == 'global_it') {
-        setState(() => _title = "Stock Global de Red");
+        if (mounted) setState(() => _title = "Stock Global de Red");
       } else {
-        setState(() => _title = "Inventario de Sucursal");
+        if (mounted) setState(() => _title = "Inventario de Sucursal");
         query = query.eq('tenant_id', tenantId);
       }
 
@@ -68,8 +79,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
       if (mounted) {
         setState(() {
           _inventoryItems = List<Map<String, dynamic>>.from(response as List);
+          _filteredItems = List.from(_inventoryItems);
           _isLoading = false;
         });
+        _filterInventory();
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -77,103 +90,268 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
-  void _showAddProductDialog() {
-    final nameController = TextEditingController();
-    final skuController = TextEditingController();
-    final priceController = TextEditingController();
-    final categoryController = TextEditingController(text: "General");
+  void _filterInventory() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredItems = List.from(_inventoryItems);
+      } else {
+        _filteredItems = _inventoryItems.where((item) {
+          final name = (item['name'] ?? '').toString().toLowerCase();
+          final sku = (item['sku'] ?? '').toString().toLowerCase();
+          return name.contains(query) || sku.contains(query);
+        }).toList();
+      }
+    });
+  }
+
+  void _showProductForm({Map<String, dynamic>? product}) {
+    final bool isEdit = product != null;
+    
+    final nameController = TextEditingController(text: isEdit ? product['name'] : '');
+    final skuController = TextEditingController(text: isEdit ? product['sku'] : '');
+    final priceController = TextEditingController(text: isEdit ? product['price'].toString() : '');
+    final categoryController = TextEditingController(text: isEdit ? product['category'] : 'General');
+    
+    final meta = isEdit ? (product['metadata'] as Map<String, dynamic>? ?? {}) : {};
+    final locationController = TextEditingController(text: meta['location'] ?? '');
+    final expirationController = TextEditingController(text: meta['expiration_date'] ?? '');
+    
+    int initialStock = 0;
+    if (isEdit && product['inventory'] != null && (product['inventory'] as List).isNotEmpty) {
+      initialStock = (product['inventory'][0]['stock_level'] as num?)?.toInt() ?? 0;
+    }
+    final quantityController = TextEditingController(text: initialStock.toString());
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
-        title: const Text("Registrar Nuevo Producto", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+        title: Text(isEdit ? "Editar Producto" : "Registrar Nuevo Producto", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
         content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: "Nombre del Producto", labelStyle: TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: skuController,
-                decoration: const InputDecoration(labelText: "SKU / Código", labelStyle: TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: priceController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Precio de Venta", labelStyle: TextStyle(color: Colors.white38), prefixText: "\$ "),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: categoryController,
-                decoration: const InputDecoration(labelText: "Categoría", labelStyle: TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-            ],
+          width: 500,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: "Nombre del Producto", labelStyle: TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: skuController,
+                        decoration: const InputDecoration(labelText: "SKU / Código", labelStyle: TextStyle(color: Colors.white38)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextField(
+                        controller: priceController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: "Precio de Venta", labelStyle: TextStyle(color: Colors.white38), prefixText: "\$ "),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: categoryController,
+                        decoration: const InputDecoration(labelText: "Categoría", labelStyle: TextStyle(color: Colors.white38)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextField(
+                        controller: quantityController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: "Stock Inicial/Actual", labelStyle: TextStyle(color: Colors.white38)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: locationController,
+                        decoration: const InputDecoration(labelText: "Ubicación (Pasillo/Estante)", labelStyle: TextStyle(color: Colors.white38)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextField(
+                        controller: expirationController,
+                        decoration: const InputDecoration(labelText: "Fecha Caducidad", labelStyle: TextStyle(color: Colors.white38)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: isEdit ? Colors.blueAccent : Colors.red),
             onPressed: () {
               Navigator.pop(context);
-              _createProduct(nameController.text, skuController.text, double.tryParse(priceController.text) ?? 0.0, categoryController.text);
+              _submitProduct(
+                id: isEdit ? product['id'] : null,
+                name: nameController.text, 
+                sku: skuController.text, 
+                price: double.tryParse(priceController.text) ?? 0.0, 
+                category: categoryController.text,
+                quantity: int.tryParse(quantityController.text) ?? 0,
+                location: locationController.text,
+                expirationDate: expirationController.text
+              );
             },
-            child: const Text("Registrar"),
+            child: Text(isEdit ? "Guardar Cambios" : "Registrar"),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _createProduct(String name, String sku, double price, String category) async {
+  Future<void> _submitProduct({
+    String? id,
+    required String name, 
+    required String sku, 
+    required double price, 
+    required String category,
+    required int quantity,
+    required String location,
+    required String expirationDate,
+  }) async {
     ToastUtils.showPromiseToast(
       context, 
-      message: "Registrando producto...", 
-      promise: _executeProductCreation(name, sku, price, category), 
-      successMessage: "Producto registrado exitosamente", 
-      errorMessage: "Error al registrar producto"
+      message: id == null ? "Registrando producto..." : "Actualizando producto...", 
+      promise: _executeProductSubmit(id, name, sku, price, category, quantity, location, expirationDate), 
+      successMessage: id == null ? "Producto registrado exitosamente" : "Producto actualizado", 
+      errorMessage: "Error en la operación"
     );
   }
 
-  Future<void> _executeProductCreation(String name, String sku, double price, String category) async {
+  Future<void> _executeProductSubmit(String? id, String name, String sku, double price, String category, int quantity, String location, String expirationDate) async {
     try {
       final supabase = Supabase.instance.client;
       final tenantId = _myProfile?['tenant_id'];
 
-      // 1. Insert product
-      final productResponse = await supabase.from('products').insert({
+      final productData = {
         'name': name,
         'sku': sku,
         'price': price,
-        'tenant_id': tenantId,
         'category': category,
-      }).select().single();
+        'metadata': {
+          'location': location,
+          'expiration_date': expirationDate
+        }
+      };
 
-      // 2. Initialize inventory record for the first branch (if any)
-      if (_branches.isNotEmpty) {
-        await supabase.from('inventory').insert({
-          'tenant_id': tenantId,
-          'product_id': productResponse['id'],
-          'branch_id': _branches[0]['id'],
-          'stock_level': 0,
-        });
+      if (id == null) {
+        // Insert product
+        productData['tenant_id'] = tenantId;
+        final productResponse = await supabase.from('products').insert(productData).select().single();
+
+        // Initialize inventory record for the first branch deterministically
+        if (_branches.isNotEmpty) {
+          await supabase.from('inventory').insert({
+            'tenant_id': tenantId,
+            'product_id': productResponse['id'],
+            'branch_id': _branches[0]['id'],
+            'stock_level': quantity,
+          });
+        }
+      } else {
+        // Update product
+        await supabase.from('products').update(productData).eq('id', id);
+
+        // Update inventory record
+        if (_branches.isNotEmpty) {
+          final existingInv = await supabase.from('inventory')
+              .select('id')
+              .eq('product_id', id)
+              .eq('branch_id', _branches[0]['id'])
+              .maybeSingle();
+
+          if (existingInv != null) {
+            await supabase.from('inventory').update({'stock_level': quantity}).eq('id', existingInv['id']);
+          } else {
+            await supabase.from('inventory').insert({
+              'tenant_id': tenantId,
+              'product_id': id,
+              'branch_id': _branches[0]['id'],
+              'stock_level': quantity,
+            });
+          }
+        }
       }
 
       _fetchInventory();
     } catch (e) {
       rethrow;
     }
+  }
+
+  void _deleteProduct(Map<String, dynamic> product) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text("Eliminar Producto", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
+        content: Text("¿Estás seguro de que deseas eliminar permanentemente '${product['name']}'? Esta acción no se puede deshacer.", style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              _executeDeleteProduct(product['id']);
+            },
+            child: const Text("Eliminar", style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeDeleteProduct(String id) async {
+    ToastUtils.showPromiseToast(
+      context, 
+      message: "Eliminando producto...", 
+      promise: Supabase.instance.client.from('products').delete().eq('id', id).then((_) => _fetchInventory()), 
+      successMessage: "Producto eliminado", 
+      errorMessage: "Error al eliminar"
+    );
+  }
+
+  void _toggleProductStatus(Map<String, dynamic> product) {
+    final bool currentStatus = product['is_active'] ?? true;
+    ToastUtils.showPromiseToast(
+      context, 
+      message: currentStatus ? "Desactivando..." : "Activando...", 
+      promise: Supabase.instance.client.from('products').update({'is_active': !currentStatus}).eq('id', product['id']).then((_) => _fetchInventory()), 
+      successMessage: "Estado actualizado", 
+      errorMessage: "Error al actualizar estado"
+    );
   }
 
   @override
@@ -206,7 +384,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(width: 16),
                     ElevatedButton.icon(
-                      onPressed: _showAddProductDialog,
+                      onPressed: () => _showProductForm(),
                       icon: const Icon(LucideIcons.plus),
                       label: const Text("Nuevo Producto"),
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
@@ -222,6 +400,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 child: Column(
                   children: [
                     TextField(
+                      controller: _searchController,
                       decoration: InputDecoration(
                         hintText: "Buscar por SKU o nombre...",
                         prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
@@ -234,7 +413,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     const SizedBox(height: 32),
                     if (_isLoading)
                       const Center(child: Padding(padding: EdgeInsets.all(64), child: CircularProgressIndicator(color: Colors.red)))
-                    else if (_inventoryItems.isEmpty)
+                    else if (_filteredItems.isEmpty)
                       const Center(child: Padding(padding: EdgeInsets.all(64), child: Text("No hay productos disponibles", style: TextStyle(color: Colors.white24))))
                     else
                       _buildInventoryTable(context),
@@ -254,16 +433,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
       child: DataTable(
         headingTextStyle: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
         columns: const [
+          DataColumn(label: Text("Estado")),
           DataColumn(label: Text("Producto")),
           DataColumn(label: Text("SKU")),
+          DataColumn(label: Text("Categoría")),
           DataColumn(label: Text("Precio")),
           DataColumn(label: Text("Stock")),
           DataColumn(label: Text("Acciones")),
         ],
-        rows: _inventoryItems.map((item) {
+        rows: _filteredItems.map((item) {
           final String name = item['name'] ?? 'Desconocido';
           final String sku = item['sku'] ?? 'N/A';
+          final String category = item['category'] ?? 'N/A';
           final double priceNum = (item['price'] as num?)?.toDouble() ?? 0.0;
+          final bool isActive = item['is_active'] ?? true;
           
           int stock = 0;
           if (item['inventory'] != null && item['inventory'] is List) {
@@ -273,16 +456,42 @@ class _InventoryScreenState extends State<InventoryScreen> {
           }
 
           return DataRow(
+            color: WidgetStateProperty.resolveWith<Color?>((states) => isActive ? null : Colors.red.withOpacity(0.05)),
             cells: [
-              DataCell(Text(name, style: const TextStyle(fontWeight: FontWeight.bold))),
+              DataCell(
+                Tooltip(
+                  message: isActive ? "Activo" : "Inactivo",
+                  child: Container(
+                    width: 12, height: 12,
+                    decoration: BoxDecoration(
+                      color: isActive ? Colors.greenAccent : Colors.redAccent,
+                      shape: BoxShape.circle
+                    ),
+                  ),
+                )
+              ),
+              DataCell(Text(name, style: TextStyle(fontWeight: FontWeight.bold, decoration: isActive ? null : TextDecoration.lineThrough, color: isActive ? Colors.white : Colors.white54))),
               DataCell(Text(sku, style: const TextStyle(color: Colors.white38, fontSize: 12))),
+              DataCell(Text(category, style: const TextStyle(color: Colors.white54))),
               DataCell(Text("\$${priceNum.toStringAsFixed(2)}")),
               DataCell(Text(stock.toString(), style: TextStyle(color: stock < 5 ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold))),
               DataCell(Row(
                 children: [
-                  IconButton(icon: const Icon(LucideIcons.packagePlus, size: 16, color: Colors.blueAccent), onPressed: () {}),
-                  IconButton(icon: const Icon(LucideIcons.edit, size: 16, color: Colors.white24), onPressed: () {}),
-                  IconButton(icon: Icon(LucideIcons.trash2, size: 16, color: Colors.redAccent.withOpacity(0.5)), onPressed: () {}),
+                  IconButton(
+                    icon: Icon(isActive ? LucideIcons.eyeOff : LucideIcons.eye, size: 16, color: Colors.orangeAccent), 
+                    tooltip: isActive ? "Desactivar" : "Activar",
+                    onPressed: () => _toggleProductStatus(item)
+                  ),
+                  IconButton(
+                    icon: const Icon(LucideIcons.edit, size: 16, color: Colors.blueAccent), 
+                    tooltip: "Editar",
+                    onPressed: () => _showProductForm(product: item)
+                  ),
+                  IconButton(
+                    icon: Icon(LucideIcons.trash2, size: 16, color: Colors.redAccent.withOpacity(0.8)), 
+                    tooltip: "Eliminar",
+                    onPressed: () => _deleteProduct(item)
+                  ),
                 ],
               )),
             ],
