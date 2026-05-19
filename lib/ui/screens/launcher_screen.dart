@@ -75,7 +75,7 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
       _addLog("Buscando actualizaciones en LWizard504/PC-Stock-Manager-app (main)...");
       
       final client = HttpClient();
-      final uri = Uri.parse("https://raw.githubusercontent.com/LWizard504/PC-Stock-Manager-app/main/pc_dev_flutter/lib/services/config.dart");
+      final uri = Uri.parse("https://raw.githubusercontent.com/LWizard504/PC-Stock-Manager-app/main/pc_dev_flutter/lib/services/config.dart?t=${DateTime.now().millisecondsSinceEpoch}");
       final request = await client.getUrl(uri);
       
       final response = await request.close();
