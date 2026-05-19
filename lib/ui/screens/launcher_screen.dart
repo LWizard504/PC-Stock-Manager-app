@@ -208,7 +208,7 @@ del "%~f0"
         await batFile.writeAsString(batContent);
 
         final vbsFile = File(p.join(updateDir, 'silent_runner.vbs'));
-        final vbsContent = 'CreateObject("Wscript.Shell").Run "cmd.exe /c """' + batFile.path + '""", 0, False';
+        final vbsContent = 'CreateObject("WScript.Shell").Run "cmd.exe /c " & Chr(34) & "${batFile.path}" & Chr(34), 0, False';
         await vbsFile.writeAsString(vbsContent);
 
         _addLog("Aplicando parche y reiniciando StockManager...");
