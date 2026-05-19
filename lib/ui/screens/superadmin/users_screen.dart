@@ -48,10 +48,14 @@ class _UsersScreenState extends State<UsersScreen> {
           .from('profiles')
           .select('role, tenant_id')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
-      final role = _myProfile!['role'] as String;
-      final tenantId = _myProfile!['tenant_id'];
+      if (_myProfile == null) {
+        throw Exception("No se encontró tu perfil de usuario en la base de datos.");
+      }
+
+      final role = _myProfile?['role'] as String? ?? 'employee';
+      final tenantId = _myProfile?['tenant_id'];
 
       var query = supabase.from('profiles').select('*, branches(name)');
 
@@ -167,12 +171,21 @@ class _UsersScreenState extends State<UsersScreen> {
   Future<void> _executeCreation(String firstName, String lastName, String email, String password, String role) async {
     try {
       final supabase = Supabase.instance.client;
+      final currentUser = supabase.auth.currentUser;
+      if (currentUser == null) {
+        throw Exception("Tu sesión de usuario no es válida o ha expirado. Por favor, inicia sesión nuevamente.");
+      }
       
       // Neural Protocol: Use an isolated client to avoid session hijacking
       final tempClient = SupabaseClient(AppConfig.supabaseUrl, AppConfig.supabaseAnonKey);
       
-      final myProfileResponse = await supabase.from('profiles').select('tenant_id').eq('id', supabase.auth.currentUser!.id).single();
-      final tenantId = myProfileResponse['tenant_id'];
+      String? tenantId;
+      if (_myProfile != null) {
+        tenantId = _myProfile?['tenant_id'];
+      } else {
+        final myProfileResponse = await supabase.from('profiles').select('tenant_id').eq('id', currentUser.id).maybeSingle();
+        tenantId = myProfileResponse?['tenant_id'];
+      }
 
       final response = await tempClient.auth.signUp(
         email: email,
@@ -186,12 +199,15 @@ class _UsersScreenState extends State<UsersScreen> {
         },
       );
 
-      if (response.user == null) throw Exception("Provisioning Failure: No user returned");
+      final createdUser = response.user;
+      if (createdUser == null) {
+        throw Exception("El aprovisionamiento falló: No se pudo registrar la identidad en el servicio de autenticación.");
+      }
 
       // Force-sync the profile with the email to ensure visibility in pcdev
       // Since we are SuperAdmin, we can upsert this record safely
       await supabase.from('profiles').upsert({
-        'id': response.user!.id,
+        'id': createdUser.id,
         'email': email,
         'first_name': firstName,
         'last_name': lastName,
