@@ -25,6 +25,7 @@ import 'package:pc_dev_flutter/ui/screens/admin/payments_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
+import 'package:pc_dev_flutter/services/config.dart';
 
 class SidebarItem {
   final String title;
@@ -558,7 +559,7 @@ class _MainLayoutState extends State<MainLayout> {
           if (_isExpanded)
             Center(
               child: Text(
-                "Version 2.0.0",
+                "Version ${AppConfig.appVersion}",
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withOpacity(0.3),

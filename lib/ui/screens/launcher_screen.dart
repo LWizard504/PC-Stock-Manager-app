@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:path/path.dart' as p;
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
+import 'package:pc_dev_flutter/services/config.dart';
 
 class LauncherScreen extends StatefulWidget {
   const LauncherScreen({super.key});
@@ -69,9 +70,9 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         final responseBody = await response.transform(utf8.decoder).join();
         final json = jsonDecode(responseBody) as Map<String, dynamic>;
         
-        final latestVersionTag = json['tag_name'] as String? ?? '1.0.0';
+        final latestVersionTag = json['tag_name'] as String? ?? AppConfig.appVersion;
         final latestVersion = latestVersionTag.replaceAll('v', '').trim();
-        const currentVersion = "1.0.0"; // Local version
+        const currentVersion = AppConfig.appVersion; // Local version
 
         _addLog("Versión remota detectada: v$latestVersion (Local: v$currentVersion)");
 
@@ -96,13 +97,13 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
           }
 
           if (downloadUrl != null) {
-            _addLog("Iniciando descarga por intercambio de código AOT...");
+            _addLog("¡NUEVA ACTUALIZACIÓN DE CÓDIGO FUENTE DISPONIBLE!");
             setState(() {
               _isUpdating = true;
-              _statusText = "Descargando actualización (v$latestVersion)...";
+              _statusText = "Compilando actualizaciones desde código fuente...";
             });
 
-            await _downloadAndSwapUpdate(downloadUrl);
+            await _compileAndInstallUpdate();
             return;
           } else {
             _addLog("Advertencia: No se encontraron binarios compilados en el release.");
@@ -112,7 +113,7 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         _addLog("Aviso: Respuesta de GitHub no disponible (${response.statusCode})");
       }
 
-      _addLog("Sistema totalmente actualizado. Versión: v1.0.0");
+      _addLog("Sistema totalmente actualizado. Versión: v${AppConfig.appVersion}");
       setState(() {
         _statusText = "Acceso verificado. Redireccionando...";
         _progress = 1.0;
@@ -133,66 +134,128 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
     }
   }
 
-  Future<void> _downloadAndSwapUpdate(String url) async {
+  Future<void> _compileAndInstallUpdate() async {
     try {
-      final client = HttpClient();
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      
-      final totalBytes = response.contentLength;
-      var downloadedBytes = 0;
-      
-      final exePath = Platform.resolvedExecutable;
-      final appDir = p.dirname(exePath);
-      final originalAppSo = p.join(appDir, 'data', 'app.so');
-      
       final tempDir = Directory.systemTemp.path;
-      final tempAppSo = File(p.join(tempDir, 'app.so.tmp'));
-      
-      final sink = tempAppSo.openWrite();
-      
-      await for (var chunk in response) {
-        sink.add(chunk);
-        downloadedBytes += chunk.length;
-        if (totalBytes > 0 && mounted) {
-          setState(() {
-            _progress = downloadedBytes / totalBytes;
-            _statusText = "Descargando optimizaciones: ${(_progress * 100).toInt()}%";
-          });
-        }
-      }
-      
-      await sink.close();
-      _addLog("Descarga completada de forma exitosa.");
-      _addLog("Compilando scripts de instalación automatizada...");
+      final buildPath = p.join(tempDir, 'stockmanager_compiler');
+      final buildDir = Directory(buildPath);
+
+      _addLog("Preparando entorno de compilación en temporal...");
       await Future.delayed(const Duration(milliseconds: 500));
 
-      final batFile = File(p.join(tempDir, 'update_runner.bat'));
-      final batContent = '''
+      if (!buildDir.existsSync()) {
+        buildDir.createSync(recursive: true);
+        _addLog("Clonando repositorio principal desde GitHub...");
+        final cloneProcess = await Process.start(
+          'git',
+          ['clone', 'https://github.com/LWizard504/PC-Stock-Manager-app', '.'],
+          workingDirectory: buildPath,
+        );
+
+        await _pipeProcessOutput(cloneProcess, "Git Clone");
+      } else {
+        _addLog("Repositorio detectado. Sincronizando últimas ramas...");
+        final pullProcess = await Process.start(
+          'git',
+          ['pull'],
+          workingDirectory: buildPath,
+        );
+
+        await _pipeProcessOutput(pullProcess, "Git Pull");
+      }
+
+      _addLog("Descargando dependencias de Flutter (flutter pub get)...");
+      final pubProcess = await Process.start(
+        'flutter',
+        ['pub', 'get'],
+        workingDirectory: buildPath,
+        runInShell: true,
+      );
+      await _pipeProcessOutput(pubProcess, "Flutter Pub");
+
+      _addLog("Compilando binarios optimizados (flutter build windows)...");
+      setState(() {
+        _statusText = "Compilando aplicación (AOT)...";
+        _progress = 0.5;
+      });
+
+      final buildProcess = await Process.start(
+        'flutter',
+        ['build', 'windows', '--release'],
+        workingDirectory: buildPath,
+        runInShell: true,
+      );
+      await _pipeProcessOutput(buildProcess, "Flutter Build");
+
+      final newAppSoPath = p.join(buildPath, 'build', 'windows', 'x64', 'runner', 'Release', 'data', 'app.so');
+      final newAppSo = File(newAppSoPath);
+
+      if (newAppSo.existsSync()) {
+        _addLog("Compilación exitosa. Generando intercambio de binarios...");
+        setState(() {
+          _statusText = "Instalando actualización...";
+          _progress = 0.9;
+        });
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        final exePath = Platform.resolvedExecutable;
+        final appDir = p.dirname(exePath);
+        final originalAppSo = p.join(appDir, 'data', 'app.so');
+
+        final batFile = File(p.join(tempDir, 'update_runner.bat'));
+        final batContent = '''
 @echo off
 timeout /t 1 /nobreak > nul
-move /y "${tempAppSo.path}" "$originalAppSo"
+move /y "${newAppSo.path}" "$originalAppSo"
 start "" "$exePath"
 del "%~f0"
 ''';
-      
-      await batFile.writeAsString(batContent);
-      _addLog("Aplicando parches de sistema... Cerrando StockManager.");
-      await Future.delayed(const Duration(milliseconds: 800));
+        
+        await batFile.writeAsString(batContent);
+        _addLog("Aplicando parche y reiniciando StockManager...");
+        await Future.delayed(const Duration(milliseconds: 800));
 
-      // Run Batch process silently in detached mode
-      await Process.start('cmd.exe', ['/c', batFile.path], runInShell: true, mode: ProcessStartMode.detached);
-      exit(0);
+        await Process.start('cmd.exe', ['/c', batFile.path], runInShell: true, mode: ProcessStartMode.detached);
+        exit(0);
+      } else {
+        throw Exception("No se generó el binario app.so. Revisa la consola de build.");
+      }
 
     } catch (e) {
-      _addLog("Error crítico de descarga: $e");
+      _addLog("Error crítico de compilación: $e");
       _addLog("Omisión temporal de parche. Iniciando sesión...");
       setState(() {
         _statusText = "Fallo de actualización. Iniciando sesión...";
         _progress = 1.0;
       });
-      await Future.delayed(const Duration(milliseconds: 1500));
+      await Future.delayed(const Duration(milliseconds: 2500));
       _navigateToLogin();
+    }
+  }
+
+  Future<void> _pipeProcessOutput(Process process, String prefix) async {
+    process.stdout.transform(utf8.decoder).listen((data) {
+      final lines = data.split('\n');
+      for (var line in lines) {
+        if (line.trim().isNotEmpty) {
+          _addLog("$prefix: ${line.trim()}");
+        }
+      }
+    });
+
+    process.stderr.transform(utf8.decoder).listen((data) {
+      final lines = data.split('\n');
+      for (var line in lines) {
+        if (line.trim().isNotEmpty) {
+          _addLog("$prefix [ERROR]: ${line.trim()}");
+        }
+      }
+    });
+
+    final exitCode = await process.exitCode;
+    _addLog("$prefix finalizado con código de salida: $exitCode");
+    if (exitCode != 0) {
+      throw Exception("$prefix falló con código $exitCode");
     }
   }
 
@@ -257,7 +320,7 @@ del "%~f0"
                             style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 1),
                           ),
                           Text(
-                            "LAUNCHER & BOOTLOADER v1.0.0",
+                            "LAUNCHER & BOOTLOADER v${AppConfig.appVersion}",
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryColor, letterSpacing: 2),
                           ),
                         ],
