@@ -80,7 +80,8 @@ class _UsersScreenState extends State<UsersScreen> {
   void _showAddUserDialog() {
     final t = Provider.of<LocaleProvider>(context, listen: false).t;
     final emailController = TextEditingController();
-    final nameController = TextEditingController();
+    final firstNameController = TextEditingController();
+    final lastNameController = TextEditingController();
     final passwordController = TextEditingController(text: "StakiaNode2026!");
     String selectedRole = "employee";
 
@@ -92,42 +93,50 @@ class _UsersScreenState extends State<UsersScreen> {
         title: Text(t('users_title'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
         content: SizedBox(
           width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: "Full Name", labelStyle: TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: emailController,
-                decoration: InputDecoration(labelText: t('email'), labelStyle: const TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: passwordController,
-                obscureText: true,
-                decoration: InputDecoration(labelText: t('password'), labelStyle: const TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: selectedRole,
-                dropdownColor: const Color(0xFF1A1A1A),
-                decoration: const InputDecoration(labelText: "Access Level", labelStyle: TextStyle(color: Colors.white38)),
-                style: const TextStyle(color: Colors.white),
-                items: const [
-                  DropdownMenuItem(value: "admin", child: Text("Administrator")),
-                  DropdownMenuItem(value: "manager", child: Text("Manager")),
-                  DropdownMenuItem(value: "employee", child: Text("Employee")),
-                  DropdownMenuItem(value: "it", child: Text("IT Support")),
-                ],
-                onChanged: (val) => selectedRole = val!,
-              ),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: firstNameController,
+                  decoration: const InputDecoration(labelText: "First Name", labelStyle: TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: lastNameController,
+                  decoration: const InputDecoration(labelText: "Last Name", labelStyle: TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  decoration: InputDecoration(labelText: t('email'), labelStyle: const TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: InputDecoration(labelText: t('password'), labelStyle: const TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedRole,
+                  dropdownColor: const Color(0xFF1A1A1A),
+                  decoration: const InputDecoration(labelText: "Access Level", labelStyle: TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                  items: const [
+                    DropdownMenuItem(value: "admin", child: Text("Administrator")),
+                    DropdownMenuItem(value: "manager", child: Text("Manager")),
+                    DropdownMenuItem(value: "employee", child: Text("Employee")),
+                    DropdownMenuItem(value: "it", child: Text("IT Support")),
+                  ],
+                  onChanged: (val) => selectedRole = val!,
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -136,7 +145,7 @@ class _UsersScreenState extends State<UsersScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
               Navigator.pop(context);
-              _createUser(nameController.text, emailController.text, passwordController.text, selectedRole);
+              _createUser(firstNameController.text, lastNameController.text, emailController.text, passwordController.text, selectedRole);
             },
             child: Text(t('save')),
           ),
@@ -145,18 +154,17 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
-  Future<void> _createUser(String name, String email, String password, String role) async {
-    final t = Provider.of<LocaleProvider>(context, listen: false).t;
+  Future<void> _createUser(String firstName, String lastName, String email, String password, String role) async {
     ToastUtils.showPromiseToast(
       context, 
       message: "Provisioning...", 
-      promise: _executeCreation(name, email, password, role), 
+      promise: _executeCreation(firstName, lastName, email, password, role), 
       successMessage: "Identity Created", 
       errorMessage: "Provisioning Error"
     );
   }
 
-  Future<void> _executeCreation(String name, String email, String password, String role) async {
+  Future<void> _executeCreation(String firstName, String lastName, String email, String password, String role) async {
     try {
       final supabase = Supabase.instance.client;
       
@@ -170,7 +178,9 @@ class _UsersScreenState extends State<UsersScreen> {
         email: email,
         password: password,
         data: {
-          'full_name': name,
+          'first_name': firstName,
+          'last_name': lastName,
+          'full_name': '$firstName $lastName'.trim(),
           'tenant_id': tenantId,
           'role': role,
         },
@@ -183,7 +193,9 @@ class _UsersScreenState extends State<UsersScreen> {
       await supabase.from('profiles').upsert({
         'id': response.user!.id,
         'email': email,
-        'full_name': name,
+        'first_name': firstName,
+        'last_name': lastName,
+        'full_name': '$firstName $lastName'.trim(),
         'role': role,
         'tenant_id': tenantId,
       });
