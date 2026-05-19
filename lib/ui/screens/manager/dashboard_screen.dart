@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:intl/intl.dart';
+import 'package:pc_dev_flutter/services/signaling_service.dart';
 
 class ManagerDashboardScreen extends StatefulWidget {
   const ManagerDashboardScreen({super.key});
@@ -19,6 +20,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    SignalingService().init();
     _managerDataFuture = _fetchManagerData();
   }
 
@@ -28,8 +30,8 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       final todayStart = DateTime(now.year, now.month, now.day).toIso8601String();
 
       // 1. Sales Today
-      final salesResponse = await _supabase.from('sales').select('total').gte('created_at', todayStart);
-      final double totalToday = (salesResponse as List).fold(0, (sum, item) => sum + (item['total'] as num).toDouble());
+      final salesResponse = await _supabase.from('sales').select('total_amount').gte('created_at', todayStart);
+      final double totalToday = (salesResponse as List).fold(0, (sum, item) => sum + (item['total_amount'] as num).toDouble());
       final int countToday = salesResponse.length;
 
       // 2. Open Sessions
@@ -43,12 +45,28 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       // 4. Top Products (Simulated based on products table for now)
       final productsResponse = await _supabase.from('products').select('name, price').limit(5);
 
+      // 5. Tenant Employees
+      final currentUser = _supabase.auth.currentUser;
+      List<dynamic> profilesList = [];
+      if (currentUser != null) {
+        final profileResponse = await _supabase.from('profiles').select('tenant_id').eq('id', currentUser.id).single();
+        final tenantId = profileResponse['tenant_id'];
+        if (tenantId != null) {
+          final employeeResponse = await _supabase
+              .from('profiles')
+              .select('id, full_name, first_name, last_name, role')
+              .eq('tenant_id', tenantId);
+          profilesList = employeeResponse as List<dynamic>;
+        }
+      }
+
       return {
         'totalToday': totalToday,
         'countToday': countToday,
         'activeSessions': activeSessions,
         'stockAlerts': stockAlerts,
         'topProducts': productsResponse,
+        'profiles': profilesList,
       };
     } catch (e) {
       return {
@@ -57,6 +75,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
         'activeSessions': 0,
         'stockAlerts': 0,
         'topProducts': [],
+        'profiles': [],
       };
     }
   }
@@ -104,13 +123,14 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final isDesktop = constraints.maxWidth > 800;
+                    final profiles = data['profiles'] as List<dynamic>? ?? [];
                     if (isDesktop) {
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(flex: 1, child: _buildTopProductsCard(topProducts)),
                           const SizedBox(width: 24),
-                          Expanded(flex: 1, child: _buildEmployeeStatusCard()),
+                          Expanded(flex: 1, child: _buildEmployeeStatusCard(profiles)),
                         ],
                       );
                     } else {
@@ -118,7 +138,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                         children: [
                           _buildTopProductsCard(topProducts),
                           const SizedBox(height: 24),
-                          _buildEmployeeStatusCard(),
+                          _buildEmployeeStatusCard(profiles),
                         ],
                       );
                     }
@@ -200,21 +220,58 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
     );
   }
 
-  Widget _buildEmployeeStatusCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Estado de Sesiones", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
-            _buildEmployeeItem("Caja Principal", "Activa", "Online", true),
-            _buildEmployeeItem("Caja Secundaria", "Inactiva", "Offline", false),
-            _buildEmployeeItem("Administración", "Activa", "Online", true),
-          ],
+  Widget _buildEmployeeStatusCard(List<dynamic> profiles) {
+    if (profiles.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text("Estado de Sesiones", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 24),
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text("No se encontraron colaboradores.", style: TextStyle(color: Colors.white38)),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+      ).animate().fadeIn().slideX(begin: 0.1);
+    }
+
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: SignalingService().onlineUsersNotifier,
+      builder: (context, onlineUserIds, child) {
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Estado de Sesiones", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 24),
+                ...profiles.map((profile) {
+                  final String userId = profile['id'].toString();
+                  final isOnline = onlineUserIds.contains(userId);
+                  String name = profile['full_name'] ?? '';
+                  if (name.isEmpty) {
+                    name = '${profile['first_name'] ?? ''} ${profile['last_name'] ?? ''}'.trim();
+                  }
+                  if (name.isEmpty) name = "Colaborador Desconocido";
+                  
+                  final role = (profile['role']?.toString() ?? 'employee').toUpperCase();
+                  final status = isOnline ? "Online" : "Offline";
+
+                  return _buildEmployeeItem(name, role, status, isOnline);
+                }).toList(),
+              ],
+            ),
+          ),
+        );
+      }
     ).animate().fadeIn().slideX(begin: 0.1);
   }
 

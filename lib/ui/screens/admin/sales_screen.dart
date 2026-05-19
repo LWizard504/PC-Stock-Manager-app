@@ -54,7 +54,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
       if (mounted) {
         final sales = List<Map<String, dynamic>>.from(response);
-        final total = sales.fold(0.0, (sum, s) => sum + (s['total'] as num).toDouble());
+        final total = sales.fold(0.0, (sum, s) => sum + (s['total_amount'] as num).toDouble());
         
         setState(() {
           _sales = sales;
@@ -216,7 +216,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     DataCell(Text("#${sale['id'].toString().substring(0, 8)}", style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.white70))),
                     DataCell(Text(DateFormat('MMM dd, HH:mm').format(date).toUpperCase(), style: const TextStyle(fontSize: 11))),
                     DataCell(Text(seller, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataCell(Text("\$${(sale['total'] as num).toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.w900, color: AppTheme.primaryColor))),
+                    DataCell(Text("\$${(sale['total_amount'] as num).toStringAsFixed(2)}", style: const TextStyle(fontWeight: FontWeight.w900, color: AppTheme.primaryColor))),
                     DataCell(Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.green.withOpacity(0.2))),

@@ -27,8 +27,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception("No auth");
 
-      final salesResponse = await _supabase.from('sales').select('total');
-      final double totalRevenue = (salesResponse as List).fold(0, (sum, item) => sum + (item['total'] as num).toDouble());
+      final salesResponse = await _supabase.from('sales').select('total_amount');
+      final double totalRevenue = (salesResponse as List).fold(0, (sum, item) => sum + (item['total_amount'] as num).toDouble());
       final int totalSalesCount = salesResponse.length;
 
       final inventoryResponse = await _supabase.from('inventory').select('quantity').lt('quantity', 5);
@@ -40,7 +40,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       // Resilient recent sales fetch
       final recentSalesResponse = await _supabase
           .from('sales')
-          .select('id, total, created_at, profiles!inner(*)')
+          .select('id, total_amount, created_at, profiles!inner(*)')
           .order('created_at', ascending: false)
           .limit(5);
 
@@ -189,7 +189,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             else ...sales.map((sale) {
               final date = DateTime.parse(sale['created_at']);
               final employeeName = _getDisplayName(sale['profiles']);
-              return _buildActivityItem("Venta # ${sale['id'].toString().substring(0, 4)}", "\$${sale['total'].toStringAsFixed(2)}", "${DateFormat('HH:mm').format(date)} - $employeeName", true);
+              return _buildActivityItem("Venta # ${sale['id'].toString().substring(0, 4)}", "\$${sale['total_amount'].toStringAsFixed(2)}", "${DateFormat('HH:mm').format(date)} - $employeeName", true);
             }).toList(),
           ],
         ),

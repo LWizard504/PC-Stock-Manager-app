@@ -13,6 +13,8 @@ class SignalingService {
   io.Socket? socket;
   final String _serverUrl = AppConfig.signalingUrl;
   
+  final ValueNotifier<Set<String>> onlineUsersNotifier = ValueNotifier<Set<String>>({});
+  
   // Callbacks for UI updates
   Function(Map<String, dynamic>)? onNewMessage;
   Function(Map<String, dynamic>)? onIncomingCall;
@@ -86,15 +88,25 @@ class SignalingService {
     });
 
     socket!.on('online-users', (data) {
+      final ids = List<String>.from(data).toSet();
+      onlineUsersNotifier.value = ids;
       if (onOnlineUsers != null) onOnlineUsers!(List<String>.from(data));
     });
 
     socket!.on('user-online', (data) {
-      if (onUserOnline != null) onUserOnline!(data.toString());
+      final userId = data.toString();
+      final current = Set<String>.from(onlineUsersNotifier.value);
+      current.add(userId);
+      onlineUsersNotifier.value = current;
+      if (onUserOnline != null) onUserOnline!(userId);
     });
 
     socket!.on('user-offline', (data) {
-      if (onUserOffline != null) onUserOffline!(data.toString());
+      final userId = data.toString();
+      final current = Set<String>.from(onlineUsersNotifier.value);
+      current.remove(userId);
+      onlineUsersNotifier.value = current;
+      if (onUserOffline != null) onUserOffline!(userId);
     });
 
     socket!.on('message-sent', (data) {
