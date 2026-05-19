@@ -6,6 +6,7 @@ import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/main_layout.dart';
 import 'package:pc_dev_flutter/ui/screens/auth_assistant_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -60,7 +61,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final response = await Supabase.instance.client.auth.signInWithPassword(
         email: email,
         password: password,
-      );
+      ).timeout(const Duration(seconds: 8));
       
       if (mounted && response.user != null) {
         if (_rememberMe) {
@@ -70,18 +71,48 @@ class _LoginScreenState extends State<LoginScreen> {
           final prefs = await SharedPreferences.getInstance();
           await prefs.remove('remembered_email');
         }
+
+        try {
+          final profile = await Supabase.instance.client.from('profiles').select().eq('id', response.user!.id).single();
+          await OfflineSyncManager.instance.cacheUserCredentials(email, password, profile);
+        } catch (e) {
+          debugPrint("Failed to fetch/cache profile during login: $e");
+        }
         
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MainLayout()),
-        );
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainLayout()),
+          );
+        }
       }
     } on AuthException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.red));
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error de conexión al servidor'), backgroundColor: Colors.red));
+      debugPrint("Login network error, attempting offline login: $e");
+      
+      final offlineProfile = await OfflineSyncManager.instance.authenticateOffline(email, password);
+      if (offlineProfile != null) {
+        if (_rememberMe) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('remembered_email', email);
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Iniciando sesión en Modo Sin Conexión'), backgroundColor: Colors.amber),
+          );
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const MainLayout()),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error de conexión y no hay credenciales locales para este usuario'), backgroundColor: Colors.red),
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);

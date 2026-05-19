@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,11 +17,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _supabase = Supabase.instance.client;
   Map<String, dynamic>? _profile;
   bool _isLoading = true;
+  bool _showTouchNumpad = true;
 
   @override
   void initState() {
     super.initState();
     _fetchProfile();
+    _loadPreferences();
+  }
+
+  void _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _showTouchNumpad = prefs.getBool('show_touch_numpad') ?? true;
+      });
+    }
+  }
+
+  void _savePreference(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_touch_numpad', val);
+    if (mounted) {
+      setState(() {
+        _showTouchNumpad = val;
+      });
+    }
   }
 
   Future<void> _fetchProfile() async {
@@ -132,6 +154,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSection("Preferencias", [
               _buildTile(LucideIcons.moon, "Tema Visual", "Alternar entre modo industrial y luz", () {}),
               _buildTile(LucideIcons.languages, "Idioma", "Español (Latinoamérica)", () {}),
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                leading: const Icon(LucideIcons.keyboard, color: Colors.white60, size: 20),
+                title: const Text("Teclado Táctil POS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: const Text("Mostrar pad numérico táctil en el punto de venta", style: TextStyle(color: Colors.white24, fontSize: 12)),
+                trailing: Switch(
+                  value: _showTouchNumpad,
+                  activeColor: Colors.red,
+                  onChanged: (val) {
+                    _savePreference(val);
+                  },
+                ),
+              ),
             ]),
             
             _buildSection("Sesión", [

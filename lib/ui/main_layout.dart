@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/models/app_user.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/ui/screens/superadmin/dashboard_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/dashboard_screen.dart';
@@ -21,6 +22,7 @@ import 'package:pc_dev_flutter/ui/screens/employee/pos_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/sales_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/payments_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
+import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 
 class SidebarItem {
   final String title;
@@ -60,6 +62,7 @@ class _MainLayoutState extends State<MainLayout> {
 
     try {
       final data = await Supabase.instance.client.from('profiles').select().eq('id', user.id).single();
+      await OfflineSyncManager.instance.cacheUserProfile(data);
       
       UserRole role;
       switch(data['role']) {
@@ -89,22 +92,83 @@ class _MainLayoutState extends State<MainLayout> {
         );
         _isLoadingProfile = false;
       });
+
+      _enforceWindowRules(role);
     } catch (e) {
-      // Fallback
-      setState(() {
-        _currentUser = AppUser(
-          id: user.id,
-          name: user.userMetadata?['full_name'] ?? 'Guest',
-          email: user.email ?? '',
-          role: UserRole.admin,
-          avatarUrl: user.userMetadata?['avatar_url'],
-        );
-        _isLoadingProfile = false;
-      });
+      debugPrint("Profile load online failed, attempting offline cached profile: $e");
+      final cachedProfile = await OfflineSyncManager.instance.getCachedUserProfile();
+      
+      if (cachedProfile != null) {
+        UserRole role;
+        switch(cachedProfile['role']) {
+          case 'superadmin': role = UserRole.superadmin; break;
+          case 'admin': role = UserRole.admin; break;
+          case 'manager': role = UserRole.manager; break;
+          case 'it': role = UserRole.it; break;
+          case 'global_it': role = UserRole.it; break;
+          default: role = UserRole.employee; break;
+        }
+
+        String name = cachedProfile['full_name'] ?? '';
+        if (name.isEmpty) {
+          final first = cachedProfile['first_name'] ?? '';
+          final last = cachedProfile['last_name'] ?? '';
+          name = '$first $last'.trim();
+        }
+        if (name.isEmpty) name = 'Usuario';
+
+        setState(() {
+          _currentUser = AppUser(
+            id: cachedProfile['id'] ?? user.id,
+            name: name,
+            email: user.email ?? '',
+            role: role,
+            avatarUrl: cachedProfile['avatar_url'],
+          );
+          _isLoadingProfile = false;
+        });
+        _enforceWindowRules(role);
+      } else {
+        // Fallback
+        setState(() {
+          _currentUser = AppUser(
+            id: user.id,
+            name: user.userMetadata?['full_name'] ?? 'Guest',
+            email: user.email ?? '',
+            role: UserRole.admin,
+            avatarUrl: user.userMetadata?['avatar_url'],
+          );
+          _isLoadingProfile = false;
+        });
+        _enforceWindowRules(UserRole.admin);
+      }
+    }
+  }
+
+  void _enforceWindowRules(UserRole role) async {
+    if (role == UserRole.employee) {
+      // Kiosk mode for POS cashier
+      await windowManager.setFullScreen(true);
+      await Future.delayed(const Duration(milliseconds: 150));
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setClosable(false);
+      await windowManager.setMinimizable(false);
+      await windowManager.setMaximizable(false);
+      await windowManager.setSkipTaskbar(true);
+      await windowManager.focus();
+    } else {
+      // Normal mode for admin/manager/superadmin
+      await windowManager.setFullScreen(false);
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setClosable(true);
+      await windowManager.setMinimizable(true);
+      await windowManager.setMaximizable(true);
+      await windowManager.setSkipTaskbar(false);
     }
   }
 
   void _signOut() async {
+    _enforceWindowRules(UserRole.admin);
     await Supabase.instance.client.auth.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
@@ -193,12 +257,98 @@ class _MainLayoutState extends State<MainLayout> {
               ),
               child: Container(
                 color: Theme.of(context).scaffoldBackgroundColor,
-                child: items[_selectedIndex].screen,
+                child: Column(
+                  children: [
+                    _buildOfflineSyncBar(),
+                    Expanded(child: items[_selectedIndex].screen),
+                  ],
+                ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildOfflineSyncBar() {
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        OfflineSyncManager.instance.isOffline,
+        OfflineSyncManager.instance.pendingCount,
+        OfflineSyncManager.instance.isSyncing,
+      ]),
+      builder: (context, _) {
+        final isOffline = OfflineSyncManager.instance.isOffline.value;
+        final pendingCount = OfflineSyncManager.instance.pendingCount.value;
+        final isSyncing = OfflineSyncManager.instance.isSyncing.value;
+
+        if (!isOffline && pendingCount == 0 && !isSyncing) {
+          return const SizedBox.shrink();
+        }
+
+        Color bgColor;
+        IconData icon;
+        String text;
+        bool showProgress = false;
+
+        if (isSyncing) {
+          bgColor = Colors.blueAccent.withOpacity(0.9);
+          icon = LucideIcons.refreshCw;
+          text = "Sincronizando operaciones pendientes con el servidor en la nube...";
+          showProgress = true;
+        } else if (isOffline) {
+          bgColor = Colors.amber.shade900.withOpacity(0.9);
+          icon = LucideIcons.cloudOff;
+          text = "Modo Sin Conexión Activo — Tus cambios se guardarán localmente ($pendingCount pendientes de sincronizar)";
+        } else {
+          bgColor = Colors.green.shade800.withOpacity(0.9);
+          icon = LucideIcons.cloudLightning;
+          text = "Conexión Restablecida — Sincronización en curso ($pendingCount operaciones pendientes)";
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          decoration: BoxDecoration(
+            color: bgColor,
+            border: const Border(bottom: BorderSide(color: Colors.white10)),
+          ),
+          child: Row(
+            children: [
+              if (showProgress)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              else
+                Icon(icon, color: Colors.white, size: 16).animate(onPlay: (controller) => controller.repeat())
+                  .shimmer(duration: 1500.ms, color: Colors.white54),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+              if (pendingCount > 0 && !isSyncing)
+                TextButton.icon(
+                  onPressed: () {
+                    OfflineSyncManager.instance.checkConnectivityAndSync();
+                  },
+                  icon: const Icon(LucideIcons.refreshCw, size: 14, color: Colors.white),
+                  label: const Text("Sincronizar Ahora", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11)),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white.withOpacity(0.15),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+            ],
+          ),
+        ).animate().slideY(begin: -1, end: 0, duration: 300.ms, curve: Curves.easeOut);
+      },
     );
   }
 
@@ -383,6 +533,7 @@ class _MainLayoutState extends State<MainLayout> {
                       );
                       _selectedIndex = 0;
                     });
+                    _enforceWindowRules(roles[nextIndex]);
                   },
                   tooltip: "Switch Role",
                 ),

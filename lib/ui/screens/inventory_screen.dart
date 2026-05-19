@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
+import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -116,6 +117,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final meta = isEdit ? (product['metadata'] as Map<String, dynamic>? ?? {}) : {};
     final locationController = TextEditingController(text: meta['location'] ?? '');
     final expirationController = TextEditingController(text: meta['expiration_date'] ?? '');
+    final imageUrlController = TextEditingController(text: meta['image_url'] ?? '');
     
     int initialStock = 0;
     if (isEdit && product['inventory'] != null && (product['inventory'] as List).isNotEmpty) {
@@ -202,6 +204,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: imageUrlController,
+                  decoration: const InputDecoration(labelText: "URL de la Imagen", labelStyle: TextStyle(color: Colors.white38)),
+                  style: const TextStyle(color: Colors.white),
+                ),
               ],
             ),
           ),
@@ -220,7 +228,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 category: categoryController.text,
                 quantity: int.tryParse(quantityController.text) ?? 0,
                 location: locationController.text,
-                expirationDate: expirationController.text
+                expirationDate: expirationController.text,
+                imageUrl: imageUrlController.text
               );
             },
             child: Text(isEdit ? "Guardar Cambios" : "Registrar"),
@@ -239,74 +248,127 @@ class _InventoryScreenState extends State<InventoryScreen> {
     required int quantity,
     required String location,
     required String expirationDate,
+    required String imageUrl,
   }) async {
     ToastUtils.showPromiseToast(
       context, 
       message: id == null ? "Registrando producto..." : "Actualizando producto...", 
-      promise: _executeProductSubmit(id, name, sku, price, category, quantity, location, expirationDate), 
+      promise: _executeProductSubmit(id, name, sku, price, category, quantity, location, expirationDate, imageUrl), 
       successMessage: id == null ? "Producto registrado exitosamente" : "Producto actualizado", 
       errorMessage: "Error en la operación"
     );
   }
 
-  Future<void> _executeProductSubmit(String? id, String name, String sku, double price, String category, int quantity, String location, String expirationDate) async {
+  Future<void> _executeProductSubmit(String? id, String name, String sku, double price, String category, int quantity, String location, String expirationDate, String imageUrl) async {
+    final tenantId = _myProfile?['tenant_id'];
+    final branchId = _branches.isNotEmpty ? _branches[0]['id'] : null;
+
+    final productData = {
+      'name': name,
+      'sku': sku,
+      'price': price,
+      'category': category,
+      'metadata': {
+        'location': location,
+        'expiration_date': expirationDate,
+        'image_url': imageUrl
+      }
+    };
+
+    final type = id == null ? 'insert_product' : 'update_product';
+    final payload = {
+      'id': id,
+      'product_data': productData,
+      'quantity': quantity,
+      'branch_id': branchId,
+      'tenant_id': tenantId,
+    };
+
     try {
-      final supabase = Supabase.instance.client;
-      final tenantId = _myProfile?['tenant_id'];
+      final wasOnline = await OfflineSyncManager.instance.executeWithSync(
+        type: type,
+        payload: payload,
+        onlineAction: (supabase) async {
+          if (id == null) {
+            productData['tenant_id'] = tenantId;
+            final productResponse = await supabase.from('products').insert(productData).select().single();
+            if (branchId != null) {
+              await supabase.from('inventory').insert({
+                'tenant_id': tenantId,
+                'product_id': productResponse['id'],
+                'branch_id': branchId,
+                'stock_level': quantity,
+              });
+            }
+          } else {
+            await supabase.from('products').update(productData).eq('id', id);
+            if (branchId != null) {
+              final existingInv = await supabase.from('inventory')
+                  .select('id')
+                  .eq('product_id', id)
+                  .eq('branch_id', branchId)
+                  .maybeSingle();
 
-      final productData = {
-        'name': name,
-        'sku': sku,
-        'price': price,
-        'category': category,
-        'metadata': {
-          'location': location,
-          'expiration_date': expirationDate
-        }
-      };
+              if (existingInv != null) {
+                await supabase.from('inventory').update({'stock_level': quantity}).eq('id', existingInv['id']);
+              } else {
+                await supabase.from('inventory').insert({
+                  'tenant_id': tenantId,
+                  'product_id': id,
+                  'branch_id': branchId,
+                  'stock_level': quantity,
+                });
+              }
+            }
+          }
+        },
+      );
 
-      if (id == null) {
-        // Insert product
-        productData['tenant_id'] = tenantId;
-        final productResponse = await supabase.from('products').insert(productData).select().single();
-
-        // Initialize inventory record for the first branch deterministically
-        if (_branches.isNotEmpty) {
-          await supabase.from('inventory').insert({
-            'tenant_id': tenantId,
-            'product_id': productResponse['id'],
-            'branch_id': _branches[0]['id'],
-            'stock_level': quantity,
+      if (!wasOnline) {
+        if (id == null) {
+          final tempId = 'temp_' + DateTime.now().millisecondsSinceEpoch.toString();
+          final mockProduct = {
+            'id': tempId,
+            'name': name,
+            'sku': sku,
+            'price': price,
+            'category': category,
+            'metadata': {'location': location, 'expiration_date': expirationDate},
+            'is_active': true,
+            'inventory': [
+              {'stock_level': quantity, 'branch_id': branchId}
+            ]
+          };
+          setState(() {
+            _inventoryItems.insert(0, mockProduct);
+            _filteredItems = List.from(_inventoryItems);
+          });
+        } else {
+          setState(() {
+            final idx = _inventoryItems.indexWhere((p) => p['id'] == id);
+            if (idx != -1) {
+              _inventoryItems[idx]['name'] = name;
+              _inventoryItems[idx]['sku'] = sku;
+              _inventoryItems[idx]['price'] = price;
+              _inventoryItems[idx]['category'] = category;
+              _inventoryItems[idx]['metadata'] = {'location': location, 'expiration_date': expirationDate};
+              _inventoryItems[idx]['inventory'] = [
+                {'stock_level': quantity, 'branch_id': branchId}
+              ];
+              _filteredItems = List.from(_inventoryItems);
+            }
           });
         }
-      } else {
-        // Update product
-        await supabase.from('products').update(productData).eq('id', id);
-
-        // Update inventory record
-        if (_branches.isNotEmpty) {
-          final existingInv = await supabase.from('inventory')
-              .select('id')
-              .eq('product_id', id)
-              .eq('branch_id', _branches[0]['id'])
-              .maybeSingle();
-
-          if (existingInv != null) {
-            await supabase.from('inventory').update({'stock_level': quantity}).eq('id', existingInv['id']);
-          } else {
-            await supabase.from('inventory').insert({
-              'tenant_id': tenantId,
-              'product_id': id,
-              'branch_id': _branches[0]['id'],
-              'stock_level': quantity,
-            });
-          }
+        if (mounted) {
+          ToastUtils.showSuccessToast(context, message: "Cambio guardado localmente (Sin Conexión)");
         }
+      } else {
+        _fetchInventory();
       }
-
-      _fetchInventory();
     } catch (e) {
-      rethrow;
+      if (mounted) {
+        ToastUtils.showErrorToast(context, message: "Error al guardar: $e");
+      }
     }
   }
 
@@ -334,13 +396,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _executeDeleteProduct(String id) async {
-    ToastUtils.showPromiseToast(
-      context, 
-      message: "Eliminando producto...", 
-      promise: Supabase.instance.client.from('products').delete().eq('id', id).then((_) => _fetchInventory()), 
-      successMessage: "Producto eliminado", 
-      errorMessage: "Error al eliminar"
-    );
+    try {
+      final wasOnline = await OfflineSyncManager.instance.executeWithSync(
+        type: 'delete_product',
+        payload: {'id': id},
+        onlineAction: (supabase) async {
+          await supabase.from('products').delete().eq('id', id);
+        },
+      );
+
+      if (!wasOnline) {
+        setState(() {
+          _inventoryItems.removeWhere((p) => p['id'] == id);
+          _filteredItems = List.from(_inventoryItems);
+        });
+        if (mounted) {
+          ToastUtils.showSuccessToast(context, message: "Producto eliminado localmente (Sin Conexión)");
+        }
+      } else {
+        _fetchInventory();
+      }
+    } catch (e) {
+      if (mounted) {
+        ToastUtils.showErrorToast(context, message: "Error al eliminar: $e");
+      }
+    }
   }
 
   void _toggleProductStatus(Map<String, dynamic> product) {
@@ -470,7 +550,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   ),
                 )
               ),
-              DataCell(Text(name, style: TextStyle(fontWeight: FontWeight.bold, decoration: isActive ? null : TextDecoration.lineThrough, color: isActive ? Colors.white : Colors.white54))),
+              DataCell(
+                Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: (item['metadata'] != null && item['metadata']['image_url'] != null && (item['metadata']['image_url'] as String).isNotEmpty)
+                        ? Image.network(
+                            item['metadata']['image_url'],
+                            width: 32, height: 32,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Container(
+                              width: 32, height: 32,
+                              color: Colors.white10,
+                              child: const Icon(LucideIcons.box, size: 16, color: Colors.white38),
+                            ),
+                          )
+                        : Container(
+                            width: 32, height: 32,
+                            color: Colors.white10,
+                            child: const Icon(LucideIcons.box, size: 16, color: Colors.white38),
+                          ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(name, style: TextStyle(fontWeight: FontWeight.bold, decoration: isActive ? null : TextDecoration.lineThrough, color: isActive ? Colors.white : Colors.white54)),
+                  ],
+                ),
+              ),
               DataCell(Text(sku, style: const TextStyle(color: Colors.white38, fontSize: 12))),
               DataCell(Text(category, style: const TextStyle(color: Colors.white54))),
               DataCell(Text("\$${priceNum.toStringAsFixed(2)}")),

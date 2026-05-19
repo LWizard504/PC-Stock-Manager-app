@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 
 class POSScreen extends StatefulWidget {
   const POSScreen({super.key});
@@ -22,6 +24,7 @@ class _POSScreenState extends State<POSScreen> {
   List<Map<String, dynamic>> _products = [];
   Map<String, dynamic>? _myProfile;
   List<String> _categories = ['All'];
+  bool _showTouchNumpad = true;
   
   String? _selectedItemId;
   RealtimeChannel? _channel;
@@ -31,6 +34,16 @@ class _POSScreenState extends State<POSScreen> {
   void initState() {
     super.initState();
     _fetchInitialData();
+    _loadPreferences();
+  }
+
+  void _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _showTouchNumpad = prefs.getBool('show_touch_numpad') ?? true;
+      });
+    }
   }
 
   @override
@@ -44,10 +57,19 @@ class _POSScreenState extends State<POSScreen> {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      _myProfile = await supabase.from('profiles').select('*').eq('id', user.id).single();
       
+      if (user != null) {
+        try {
+          _myProfile = await supabase.from('profiles').select('*').eq('id', user.id).single();
+          await OfflineSyncManager.instance.cacheUserProfile(_myProfile!);
+        } catch (e) {
+          debugPrint("POS load profile online failed, falling back to cache: $e");
+          _myProfile = await OfflineSyncManager.instance.getCachedUserProfile();
+        }
+      } else {
+        _myProfile = await OfflineSyncManager.instance.getCachedUserProfile();
+      }
+
       _setupRealtime();
       await _fetchProducts();
     } catch (e) {
@@ -73,26 +95,62 @@ class _POSScreenState extends State<POSScreen> {
       final tenantId = _myProfile?['tenant_id'];
       String? currentBranchId = _myProfile?['branch_id'];
 
-      if (currentBranchId == null && tenantId != null) {
-        final fallbackBranch = await supabase.from('branches').select('id').eq('tenant_id', tenantId).order('created_at', ascending: true).limit(1).maybeSingle();
-        currentBranchId = fallbackBranch?['id'] as String?;
+      List<Map<String, dynamic>> products;
+
+      try {
+        if (currentBranchId == null && tenantId != null) {
+          final fallbackBranch = await supabase.from('branches').select('id').eq('tenant_id', tenantId).order('created_at', ascending: true).limit(1).maybeSingle();
+          currentBranchId = fallbackBranch?['id'] as String?;
+        }
+
+        var query = supabase.from('products').select('*, inventory(*)').eq('is_active', true);
+        if (tenantId != null) query = query.eq('tenant_id', tenantId);
+
+        final response = await query;
+        products = List<Map<String, dynamic>>.from(response);
+
+        // Cache the list of products for offline usage
+        await OfflineSyncManager.instance.cacheProducts(products);
+      } catch (e) {
+        debugPrint("Failed to fetch products online, loading offline cache: $e");
+        final cached = await OfflineSyncManager.instance.getCachedProducts();
+        if (cached != null) {
+          products = cached;
+        } else {
+          products = [];
+        }
       }
 
-      if (currentBranchId == null) {
-        if (mounted) setState(() { _products = []; _isLoadingProducts = false; });
-        return;
-      }
-
-      var query = supabase.from('products').select('*, inventory(stock_level, branch_id)').eq('is_active', true);
-      if (tenantId != null) query = query.eq('tenant_id', tenantId);
-
-      final response = await query;
       if (mounted) {
-        final products = List<Map<String, dynamic>>.from(response);
         final cats = {'All'};
+
+        // If currentBranchId is still null, look through products' inventory list to dynamically fallback to the branch with stock!
+        if (currentBranchId == null) {
+          for (var p in products) {
+            if (p['inventory'] != null && p['inventory'] is List && (p['inventory'] as List).isNotEmpty) {
+              for (var inv in p['inventory']) {
+                if ((inv['stock_level'] as num?)?.toInt() != 0) {
+                  currentBranchId = inv['branch_id'] as String?;
+                  break;
+                }
+              }
+              if (currentBranchId != null) break;
+            }
+          }
+          // If still null, just take the first branch_id found
+          if (currentBranchId == null) {
+            for (var p in products) {
+              if (p['inventory'] != null && p['inventory'] is List && (p['inventory'] as List).isNotEmpty) {
+                currentBranchId = p['inventory'][0]['branch_id'] as String?;
+                if (currentBranchId != null) break;
+              }
+            }
+          }
+        }
         
         for (var p in products) {
           final meta = p['metadata'] as Map<String, dynamic>? ?? {};
+          p['image_url'] = meta['image_url'];
           if (meta.containsKey('category')) cats.add(meta['category']);
           
           int stock = 0;
@@ -101,6 +159,11 @@ class _POSScreenState extends State<POSScreen> {
               if (inv['branch_id'] == currentBranchId) {
                 stock = (inv['stock_level'] as num?)?.toInt() ?? 0;
                 break;
+              }
+            }
+            if (stock == 0) {
+              for (var inv in p['inventory']) {
+                stock += (inv['stock_level'] as num?)?.toInt() ?? 0;
               }
             }
           }
@@ -127,13 +190,13 @@ class _POSScreenState extends State<POSScreen> {
         if (_cart[existingIndex]['qty'] < stock) {
           _cart[existingIndex]['qty']++;
         } else {
-          ToastUtils.showErrorToast(context, "Stock insuficiente ($stock disponibles)");
+          ToastUtils.showCustomToast(context, "Stock insuficiente ($stock disponibles)", isError: true);
         }
       } else {
         if (stock > 0) {
           _cart.add({...product, 'qty': 1});
         } else {
-          ToastUtils.showErrorToast(context, "Stock insuficiente (0 disponibles)");
+          ToastUtils.showCustomToast(context, "Stock insuficiente (0 disponibles)", isError: true);
         }
       }
       _selectedItemId = product['id'];
@@ -149,7 +212,7 @@ class _POSScreenState extends State<POSScreen> {
       final stock = product['stock'] as int? ?? 0;
       
       if (newQty > stock) {
-        ToastUtils.showErrorToast(context, "Stock insuficiente ($stock disponibles)");
+        ToastUtils.showCustomToast(context, "Stock insuficiente ($stock disponibles)", isError: true);
         return;
       }
       
@@ -198,10 +261,10 @@ class _POSScreenState extends State<POSScreen> {
     
     if (matchIndex >= 0) {
        _addToCart(_products[matchIndex]);
-       ToastUtils.showSuccessToast(context, "Agregado: ${_products[matchIndex]['name']}");
+       ToastUtils.showCustomToast(context, "Agregado: ${_products[matchIndex]['name']}");
        _searchController.clear();
     } else {
-       ToastUtils.showErrorToast(context, "Producto no encontrado");
+       ToastUtils.showCustomToast(context, "Producto no encontrado", isError: true);
     }
   }
 
@@ -247,19 +310,48 @@ class _POSScreenState extends State<POSScreen> {
         'price': item['price']
       }).toList();
 
-      await Supabase.instance.client.rpc('process_complete_sale', params: {
+      final payload = {
         'p_tenant_id': tenantId,
         'p_branch_id': branchId,
         'p_employee_id': user.id,
         'p_total': _total,
-        'p_items': itemsJson
-      });
+        'p_items': itemsJson,
+      };
 
-      if (mounted) setState(() {
-         _cart.clear();
-         _selectedItemId = null;
-         _isProcessing = false;
-      });
+      final wasOnline = await OfflineSyncManager.instance.executeWithSync(
+        type: 'process_complete_sale',
+        payload: payload,
+        onlineAction: (supabase) async {
+          await supabase.rpc('process_complete_sale', params: payload);
+        },
+      );
+
+      if (!wasOnline) {
+        setState(() {
+          for (var item in activeCart) {
+            final idx = _products.indexWhere((p) => p['id'] == item['id']);
+            if (idx != -1) {
+              final currentStock = _products[idx]['stock'] as int? ?? 0;
+              _products[idx]['stock'] = (currentStock - (item['qty'] as int)).clamp(0, 999999);
+            }
+          }
+          _cart.clear();
+          _selectedItemId = null;
+          _isProcessing = false;
+        });
+        if (mounted) {
+          ToastUtils.showSuccessToast(context, message: "Venta guardada localmente (Sin Conexión)");
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _cart.clear();
+            _selectedItemId = null;
+            _isProcessing = false;
+          });
+        }
+        await _fetchProducts();
+      }
     } catch (e) { 
       if (mounted) setState(() => _isProcessing = false);
       rethrow; 
@@ -297,8 +389,11 @@ class _POSScreenState extends State<POSScreen> {
   }
 
   Widget _buildHeader(String Function(String) t) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Wrap(
+      spacing: 16,
+      runSpacing: 16,
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -309,9 +404,10 @@ class _POSScreenState extends State<POSScreen> {
           ],
         ),
         Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: 300,
+              width: 250,
               child: TextField(
                 controller: _searchController,
                 onSubmitted: _handleSearchSubmit,
@@ -333,7 +429,7 @@ class _POSScreenState extends State<POSScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.surfaceDark,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)
               ),
@@ -347,7 +443,7 @@ class _POSScreenState extends State<POSScreen> {
                 backgroundColor: Colors.red.withOpacity(0.1),
                 foregroundColor: Colors.red,
                 elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1)
               ),
@@ -466,7 +562,7 @@ class _POSScreenState extends State<POSScreen> {
         children: [
           _buildCartHeader(t),
           Expanded(child: _buildCartItems()),
-          if (_selectedItemId != null) _buildNumpad(),
+          if (_selectedItemId != null && _showTouchNumpad) _buildNumpad(),
           _buildCartTotals(t),
         ],
       ),
@@ -475,7 +571,7 @@ class _POSScreenState extends State<POSScreen> {
 
   Widget _buildCartHeader(String Function(String) t) {
     return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Row(
         children: [
           const Icon(LucideIcons.shoppingCart, color: Colors.red, size: 20),
@@ -534,7 +630,26 @@ class _POSScreenState extends State<POSScreen> {
                     ],
                   ),
                 ),
-                Text("${item['qty']}x", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: isSelected ? Colors.red : Colors.white)),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(LucideIcons.minusCircle, size: 20, color: Colors.white38),
+                      onPressed: () => _updateQuantity(item['id'], item['qty'] - 1),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                    const SizedBox(width: 8),
+                    Text("${item['qty']}", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: isSelected ? Colors.red : Colors.white)),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(LucideIcons.plusCircle, size: 20, color: Colors.white38),
+                      onPressed: () => _updateQuantity(item['id'], item['qty'] + 1),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -594,16 +709,16 @@ class _POSScreenState extends State<POSScreen> {
 
   Widget _buildCartTotals(String Function(String) t) {
     return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: const BoxDecoration(color: Colors.black, borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       child: Column(
         children: [
           _buildTotalRow("SUBTOTAL", "\$${_subtotal.toStringAsFixed(2)}"),
           const SizedBox(height: 8),
           _buildTotalRow("NETWORK TAX (15%)", "\$${_tax.toStringAsFixed(2)}"),
-          const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider(color: Colors.white10)),
+          const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(color: Colors.white10)),
           _buildTotalRow("VALUATION TOTAL", "\$${_total.toStringAsFixed(2)}", isTotal: true),
-          const SizedBox(height: 32),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             height: 64,

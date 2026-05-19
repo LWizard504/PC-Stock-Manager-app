@@ -74,6 +74,14 @@ class ToastUtils {
       ),
     );
   }
+
+  static void showSuccessToast(BuildContext context, {required String message}) {
+    showCustomToast(context, message, isError: false);
+  }
+
+  static void showErrorToast(BuildContext context, {required String message}) {
+    showCustomToast(context, message, isError: true);
+  }
 }
 
 class _PromiseToastWidget extends StatefulWidget {

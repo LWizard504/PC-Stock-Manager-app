@@ -6,6 +6,8 @@ import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/services/config.dart';
+import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
+import 'package:window_manager/window_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +17,20 @@ void main() async {
     url: AppConfig.supabaseUrl,
     anonKey: AppConfig.supabaseAnonKey,
   );
+
+  // Initialize OfflineSyncManager
+  await OfflineSyncManager.instance.init();
+
+  await windowManager.ensureInitialized();
+  WindowOptions windowOptions = const WindowOptions(
+    title: 'StockManager',
+    center: true,
+  );
+  
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
 
   runApp(
     MultiProvider(
