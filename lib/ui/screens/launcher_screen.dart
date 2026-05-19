@@ -48,6 +48,22 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
     }
   }
 
+  bool _isVersionSuperior(String latest, String current) {
+    try {
+      List<int> latestParts = latest.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      List<int> currentParts = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+
+      int maxLen = latestParts.length > currentParts.length ? latestParts.length : currentParts.length;
+      for (int i = 0; i < maxLen; i++) {
+        int l = i < latestParts.length ? latestParts[i] : 0;
+        int c = i < currentParts.length ? currentParts[i] : 0;
+        if (l > c) return true;
+        if (l < c) return false;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Future<void> _runBootDiagnostics() async {
     _addLog("Inicializando telemetría de StockManager...");
     await Future.delayed(const Duration(milliseconds: 800));
@@ -56,48 +72,30 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
     await Future.delayed(const Duration(milliseconds: 600));
 
     try {
-      _addLog("Buscando actualizaciones en LWizard504/PC-Stock-Manager-app...");
+      _addLog("Buscando actualizaciones en LWizard504/PC-Stock-Manager-app (main)...");
       
       final client = HttpClient();
-      final uri = Uri.parse("https://api.github.com/repos/LWizard504/PC-Stock-Manager-app/releases/latest");
+      final uri = Uri.parse("https://raw.githubusercontent.com/LWizard504/PC-Stock-Manager-app/main/pc_dev_flutter/lib/services/config.dart");
       final request = await client.getUrl(uri);
       
-      // GitHub API requires a User-Agent header
-      request.headers.set('User-Agent', 'StockManager-Launcher');
       final response = await request.close();
       
       if (response.statusCode == 200) {
         final responseBody = await response.transform(utf8.decoder).join();
-        final json = jsonDecode(responseBody) as Map<String, dynamic>;
         
-        final latestVersionTag = json['tag_name'] as String? ?? AppConfig.appVersion;
-        final latestVersion = latestVersionTag.replaceAll('v', '').trim();
-        const currentVersion = AppConfig.appVersion; // Local version
+        // Match: static const String appVersion = '...'; or "..."
+        final regExp = RegExp(r"static const String appVersion\s*=\s*['\x22]([^'\x22]+)['\x22];");
+        final match = regExp.firstMatch(responseBody);
+        
+        if (match != null) {
+          final latestVersion = match.group(1)!.trim();
+          const currentVersion = AppConfig.appVersion; // Local version
 
-        _addLog("Versión remota detectada: v$latestVersion (Local: v$currentVersion)");
+          _addLog("Versión remota detectada: v$latestVersion (Local: v$currentVersion)");
 
-        if (latestVersion != currentVersion) {
-          _addLog("¡NUEVA ACTUALIZACIÓN DETECTADA: v$latestVersion!");
-          
-          final assets = json['assets'] as List<dynamic>? ?? [];
-          String? downloadUrl;
-          
-          // Look for 'app.so' or 'data/app.so' asset first
-          for (var asset in assets) {
-            final name = (asset['name'] as String? ?? '').toLowerCase();
-            if (name == 'app.so' || name.contains('app.so')) {
-              downloadUrl = asset['browser_download_url'] as String?;
-              break;
-            }
-          }
-          
-          // Fallback to first available asset if no specific 'app.so' is found
-          if (downloadUrl == null && assets.isNotEmpty) {
-            downloadUrl = assets.first['browser_download_url'] as String?;
-          }
-
-          if (downloadUrl != null) {
-            _addLog("¡NUEVA ACTUALIZACIÓN DE CÓDIGO FUENTE DISPONIBLE!");
+          if (_isVersionSuperior(latestVersion, currentVersion)) {
+            _addLog("¡NUEVA ACTUALIZACIÓN DETECTADA: v$latestVersion!");
+            _addLog("Iniciando auto-compilación desde código fuente...");
             setState(() {
               _isUpdating = true;
               _statusText = "Compilando actualizaciones desde código fuente...";
@@ -105,12 +103,12 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
 
             await _compileAndInstallUpdate();
             return;
-          } else {
-            _addLog("Advertencia: No se encontraron binarios compilados en el release.");
           }
+        } else {
+          _addLog("Aviso: No se pudo parsear el identificador de versión en el repositorio.");
         }
       } else {
-        _addLog("Aviso: Respuesta de GitHub no disponible (${response.statusCode})");
+        _addLog("Aviso: Repositorio no accesible en este momento (HTTP ${response.statusCode})");
       }
 
       _addLog("Sistema totalmente actualizado. Versión: v${AppConfig.appVersion}");
