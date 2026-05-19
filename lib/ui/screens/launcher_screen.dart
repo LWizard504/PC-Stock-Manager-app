@@ -125,12 +125,18 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
 
   Future<void> _compileAndInstallUpdate() async {
     try {
-      final tempDir = Directory.systemTemp.path;
-      final buildPath = p.join(tempDir, 'stockmanager_compiler');
+      final exePath = Platform.resolvedExecutable;
+      final appDir = p.dirname(exePath);
+      final updateDir = p.join(appDir, 'update');
+      final buildPath = p.join(updateDir, 'stockmanager_compiler');
       final buildDir = Directory(buildPath);
 
-      _addLog("Preparando entorno de compilación en temporal...");
+      _addLog("Preparando entorno de compilación en local...");
       await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!Directory(updateDir).existsSync()) {
+        Directory(updateDir).createSync(recursive: true);
+      }
 
       if (!buildDir.existsSync()) {
         buildDir.createSync(recursive: true);
@@ -187,24 +193,29 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         });
         await Future.delayed(const Duration(milliseconds: 500));
 
-        final exePath = Platform.resolvedExecutable;
-        final appDir = p.dirname(exePath);
         final originalAppSo = p.join(appDir, 'data', 'app.so');
 
-        final batFile = File(p.join(tempDir, 'update_runner.bat'));
+        final batFile = File(p.join(updateDir, 'update_runner.bat'));
         final batContent = '''
 @echo off
 timeout /t 1 /nobreak > nul
 move /y "${newAppSo.path}" "$originalAppSo"
+rd /s /q "${buildDir.path}"
 start "" "$exePath"
 del "%~f0"
 ''';
         
         await batFile.writeAsString(batContent);
+
+        final vbsFile = File(p.join(updateDir, 'silent_runner.vbs'));
+        final vbsContent = 'CreateObject("Wscript.Shell").Run "cmd.exe /c """' + batFile.path + '""", 0, False';
+        await vbsFile.writeAsString(vbsContent);
+
         _addLog("Aplicando parche y reiniciando StockManager...");
         await Future.delayed(const Duration(milliseconds: 800));
 
-        await Process.start('cmd.exe', ['/c', batFile.path], runInShell: true, mode: ProcessStartMode.detached);
+        // Start VBScript silently in background without flashing any CMD prompt
+        await Process.start('wscript.exe', [vbsFile.path], runInShell: false, mode: ProcessStartMode.detached);
         exit(0);
       } else {
         throw Exception("No se generó el binario app.so. Revisa la consola de build.");

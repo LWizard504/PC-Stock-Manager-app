@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Inno Setup Installer Script (Machine-specific paths)
+stockmanager_installer.iss
