@@ -533,14 +533,6 @@ class _MainLayoutState extends State<MainLayout> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (kDebugMode) ...[
-                    IconButton(
-                      icon: const Icon(LucideIcons.refreshCw, size: 20, color: AppTheme.primaryColor),
-                      onPressed: _switchRole,
-                      tooltip: "Switch Role",
-                    ),
-                    const SizedBox(width: 8),
-                  ],
                   IconButton(
                     icon: const Icon(LucideIcons.logOut, size: 20, color: Colors.redAccent),
                     onPressed: _signOut,
@@ -554,14 +546,6 @@ class _MainLayoutState extends State<MainLayout> {
           else
             Column(
               children: [
-                if (kDebugMode) ...[
-                  IconButton(
-                    icon: const Icon(LucideIcons.refreshCw, size: 16, color: AppTheme.primaryColor),
-                    onPressed: _switchRole,
-                    tooltip: "Switch Role",
-                  ),
-                  const SizedBox(height: 8),
-                ],
                 IconButton(
                   icon: const Icon(LucideIcons.logOut, size: 16, color: Colors.redAccent),
                   onPressed: _signOut,

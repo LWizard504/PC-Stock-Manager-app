@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
+import 'package:pc_dev_flutter/ui/widgets/skeleton_loader.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -492,7 +493,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(height: 32),
                     if (_isLoading)
-                      const Center(child: Padding(padding: EdgeInsets.all(64), child: CircularProgressIndicator(color: Colors.red)))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24.0),
+                        child: SkeletonLoader.table(rows: 6, columns: 7),
+                      )
                     else if (_filteredItems.isEmpty)
                       const Center(child: Padding(padding: EdgeInsets.all(64), child: Text("No hay productos disponibles", style: TextStyle(color: Colors.white24))))
                     else

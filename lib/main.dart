@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
@@ -68,7 +69,7 @@ class StockManagerApp extends StatelessWidget {
           displayColor: Colors.white,
         ),
       ),
-      home: const LoginScreen(),
+      home: const LauncherScreen(),
     );
   }
 }

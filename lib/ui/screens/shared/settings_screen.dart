@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -169,6 +170,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             
+             _buildSection("Sistema y Actualizaciones", [
+              _buildTile(LucideIcons.download, "Buscar Actualizaciones", "Verificar optimizaciones y reiniciar launcher", () {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const LauncherScreen()),
+                  (route) => false,
+                );
+              }),
+            ]),
+
             _buildSection("Sesión", [
               _buildTile(LucideIcons.logOut, "Cerrar Sesión", "Finalizar acceso en este dispositivo", _logout, isDestructive: true),
             ]),
