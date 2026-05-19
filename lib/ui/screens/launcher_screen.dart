@@ -75,37 +75,28 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
       _addLog("Buscando actualizaciones en LWizard504/PC-Stock-Manager-app (main)...");
       
       final client = HttpClient();
-      final uri = Uri.parse("https://raw.githubusercontent.com/LWizard504/PC-Stock-Manager-app/main/pc_dev_flutter/lib/services/config.dart?t=${DateTime.now().millisecondsSinceEpoch}");
+      final uri = Uri.parse("https://raw.githubusercontent.com/LWizard504/PC-Stock-Manager-app/main/version.txt?t=${DateTime.now().millisecondsSinceEpoch}");
       final request = await client.getUrl(uri);
       
       final response = await request.close();
       
       if (response.statusCode == 200) {
         final responseBody = await response.transform(utf8.decoder).join();
-        
-        // Match: static const String appVersion = '...'; or "..."
-        final regExp = RegExp(r"static const String appVersion\s*=\s*['\x22]([^'\x22]+)['\x22];");
-        final match = regExp.firstMatch(responseBody);
-        
-        if (match != null) {
-          final latestVersion = match.group(1)!.trim();
-          const currentVersion = AppConfig.appVersion; // Local version
+        final latestVersion = responseBody.trim();
+        const currentVersion = AppConfig.appVersion; // Local version
 
-          _addLog("Versión remota detectada: v$latestVersion (Local: v$currentVersion)");
+        _addLog("Versión remota detectada: v$latestVersion (Local: v$currentVersion)");
 
-          if (_isVersionSuperior(latestVersion, currentVersion)) {
-            _addLog("¡NUEVA ACTUALIZACIÓN DETECTADA: v$latestVersion!");
-            _addLog("Iniciando auto-compilación desde código fuente...");
-            setState(() {
-              _isUpdating = true;
-              _statusText = "Compilando actualizaciones desde código fuente...";
-            });
+        if (_isVersionSuperior(latestVersion, currentVersion)) {
+          _addLog("¡NUEVA ACTUALIZACIÓN DETECTADA: v$latestVersion!");
+          _addLog("Iniciando auto-compilación desde código fuente...");
+          setState(() {
+            _isUpdating = true;
+            _statusText = "Compilando actualizaciones desde código fuente...";
+          });
 
-            await _compileAndInstallUpdate();
-            return;
-          }
-        } else {
-          _addLog("Aviso: No se pudo parsear el identificador de versión en el repositorio.");
+          await _compileAndInstallUpdate();
+          return;
         }
       } else {
         _addLog("Aviso: Repositorio no accesible en este momento (HTTP ${response.statusCode})");
