@@ -25,6 +25,7 @@ void main() async {
   WindowOptions windowOptions = const WindowOptions(
     title: 'StockManager',
     center: true,
+    titleBarStyle: TitleBarStyle.hidden,
   );
   
   windowManager.waitUntilReadyToShow(windowOptions, () async {

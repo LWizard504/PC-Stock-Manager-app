@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -23,6 +24,7 @@ import 'package:pc_dev_flutter/ui/screens/admin/sales_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/payments_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
+import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
 
 class SidebarItem {
   final String title;
@@ -229,6 +231,22 @@ class _MainLayoutState extends State<MainLayout> {
     });
   }
 
+  void _switchRole() {
+    final roles = UserRole.values;
+    final nextIndex = (roles.indexOf(_currentUser!.role) + 1) % roles.length;
+    setState(() {
+      _currentUser = AppUser(
+        id: _currentUser!.id,
+        name: _currentUser!.name,
+        email: _currentUser!.email,
+        avatarUrl: _currentUser!.avatarUrl,
+        role: roles[nextIndex],
+      );
+      _selectedIndex = 0;
+    });
+    _enforceWindowRules(roles[nextIndex]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Provider.of<LocaleProvider>(context).t;
@@ -245,25 +263,35 @@ class _MainLayoutState extends State<MainLayout> {
       _selectedIndex = 0;
     }
 
+    final showCustomTitleBar = _currentUser!.role != UserRole.employee;
+
     return Scaffold(
-      body: Row(
+      body: Column(
         children: [
-          _buildSidebar(items),
+          if (showCustomTitleBar)
+            const CustomWindowBar(showLogo: true),
           Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(24),
-                bottomLeft: Radius.circular(24),
-              ),
-              child: Container(
-                color: Theme.of(context).scaffoldBackgroundColor,
-                child: Column(
-                  children: [
-                    _buildOfflineSyncBar(),
-                    Expanded(child: items[_selectedIndex].screen),
-                  ],
+            child: Row(
+              children: [
+                _buildSidebar(items),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(24),
+                      bottomLeft: Radius.circular(24),
+                    ),
+                    child: Container(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      child: Column(
+                        children: [
+                          _buildOfflineSyncBar(),
+                          Expanded(child: items[_selectedIndex].screen),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ],
@@ -505,6 +533,14 @@ class _MainLayoutState extends State<MainLayout> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  if (kDebugMode) ...[
+                    IconButton(
+                      icon: const Icon(LucideIcons.refreshCw, size: 20, color: AppTheme.primaryColor),
+                      onPressed: _switchRole,
+                      tooltip: "Switch Role",
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   IconButton(
                     icon: const Icon(LucideIcons.logOut, size: 20, color: Colors.redAccent),
                     onPressed: _signOut,
@@ -518,25 +554,14 @@ class _MainLayoutState extends State<MainLayout> {
           else
             Column(
               children: [
-                IconButton(
-                  icon: const Icon(LucideIcons.refreshCw, size: 16, color: AppTheme.primaryColor),
-                  onPressed: () {
-                    final roles = UserRole.values;
-                    final nextIndex = (roles.indexOf(_currentUser!.role) + 1) % roles.length;
-                    setState(() {
-                      _currentUser = AppUser(
-                        id: _currentUser!.id,
-                        name: _currentUser!.name,
-                        email: _currentUser!.email,
-                        avatarUrl: _currentUser!.avatarUrl,
-                        role: roles[nextIndex],
-                      );
-                      _selectedIndex = 0;
-                    });
-                    _enforceWindowRules(roles[nextIndex]);
-                  },
-                  tooltip: "Switch Role",
-                ),
+                if (kDebugMode) ...[
+                  IconButton(
+                    icon: const Icon(LucideIcons.refreshCw, size: 16, color: AppTheme.primaryColor),
+                    onPressed: _switchRole,
+                    tooltip: "Switch Role",
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 IconButton(
                   icon: const Icon(LucideIcons.logOut, size: 16, color: Colors.redAccent),
                   onPressed: _signOut,
