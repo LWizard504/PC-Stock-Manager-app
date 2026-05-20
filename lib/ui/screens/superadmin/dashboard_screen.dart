@@ -5,6 +5,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:pc_dev_flutter/context/locale_provider.dart';
+import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
+import 'package:pc_dev_flutter/services/signaling_service.dart';
 
 enum DateFilter { days, months, years }
 
@@ -469,12 +473,228 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              if (admin != null) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white12,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 44),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showResetPasswordDialog(Map<String, dynamic>.from(admin));
+                        },
+                        icon: const Icon(LucideIcons.key, size: 16),
+                        label: const Text("Resetear Contraseña", style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.withOpacity(0.15),
+                          foregroundColor: Colors.redAccent,
+                          minimumSize: const Size(double.infinity, 44),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.redAccent, width: 0.5)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _showPurgeConfirmDialog(Map<String, dynamic>.from(admin));
+                        },
+                        icon: const Icon(LucideIcons.trash2, size: 16),
+                        label: const Text("Purgar Identidad", style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  void _showResetPasswordDialog(Map<String, dynamic> userMap) {
+    final t = Provider.of<LocaleProvider>(context, listen: false).t;
+    final passwordController = TextEditingController();
+    String name = userMap['full_name'] ?? '';
+    if (name.isEmpty) {
+      final first = userMap['first_name'] ?? '';
+      final last = userMap['last_name'] ?? '';
+      name = '$first $last'.trim();
+    }
+    if (name.isEmpty) name = 'Unknown Identity';
+    final email = userMap['email'] ?? 'No Email';
+    final userId = userMap['id'];
+    bool obscurePassword = true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF121212),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+          title: const Text("Reset Password", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Target: $name ($email)",
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: passwordController,
+                  obscureText: obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: "New Password",
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword ? LucideIcons.eyeOff : LucideIcons.eye,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                    ),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(t('cancel'), style: const TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                if (passwordController.text.trim().length < 6) {
+                  ToastUtils.showCustomToast(context, "Password must be at least 6 characters", isError: true);
+                  return;
+                }
+                Navigator.pop(context);
+                _resetUserPassword(userId, email, passwordController.text.trim());
+              },
+              child: Text(t('save')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resetUserPassword(String userId, String email, String newPassword) async {
+    ToastUtils.showPromiseToast(
+      context, 
+      message: "Resetting...", 
+      promise: _executePasswordReset(userId, email, newPassword), 
+      successMessage: "Password updated successfully", 
+      errorMessage: "Reset Failure"
+    );
+  }
+
+  Future<void> _executePasswordReset(String userId, String email, String newPassword) async {
+    try {
+      await SignalingService().adminResetPassword(userId, email, newPassword);
+      setState(() {
+        _dashboardDataFuture = _fetchDashboardData();
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  void _showPurgeConfirmDialog(Map<String, dynamic> userMap) {
+    final t = Provider.of<LocaleProvider>(context, listen: false).t;
+    String name = userMap['full_name'] ?? '';
+    if (name.isEmpty) {
+      final first = userMap['first_name'] ?? '';
+      final last = userMap['last_name'] ?? '';
+      name = '$first $last'.trim();
+    }
+    if (name.isEmpty) name = 'Unknown Identity';
+    final email = userMap['email'] ?? 'No Email';
+    final userId = userMap['id'];
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text("Confirm Purge", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Are you sure you want to permanently delete this identity?",
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Target: $name ($email)",
+              style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "All associated telemetry and access credentials will be purged from the network. This action cannot be undone.",
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(t('cancel'), style: const TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              _purgeUser(userId, name, email);
+            },
+            child: const Text("PURGE IDENTITY"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _purgeUser(String userId, String name, String email) async {
+    ToastUtils.showPromiseToast(
+      context, 
+      message: "Purging...", 
+      promise: _executePurge(userId, name, email), 
+      successMessage: "Identity purged from network", 
+      errorMessage: "Purge Error"
+    );
+  }
+
+  Future<void> _executePurge(String userId, String name, String email) async {
+    try {
+      await SignalingService().adminPurgeUser(userId, name, email);
+      setState(() {
+        _dashboardDataFuture = _fetchDashboardData();
+      });
+    } catch (e) {
+      rethrow;
+    }
   }
 
   Widget _buildDetailRow(String label, String value) {

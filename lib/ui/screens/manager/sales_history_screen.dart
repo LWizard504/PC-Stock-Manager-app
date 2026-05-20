@@ -43,7 +43,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
         if (tenantId != null) {
           final data = await _supabase
               .from('sales')
-              .select('id, total, created_at, seller_id, branch_id, profiles!seller_id(full_name), branches!branch_id(name)')
+              .select('id, total_amount, created_at, seller_id, branch_id, profiles!seller_id(full_name), branches!branch_id(name)')
               .eq('tenant_id', tenantId)
               .order('created_at', ascending: false);
 
@@ -183,7 +183,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                                     final receiptId = "RCPT-${rawId.substring(0, rawId.length.clamp(0, 8))}".toUpperCase();
                                     final sellerName = sale['profiles']?['full_name'] ?? 'Unknown Operative';
                                     final branchName = sale['branches']?['name'] ?? 'Primary Node';
-                                    final total = double.tryParse(sale['total'].toString()) ?? 0.0;
+                                    final total = double.tryParse(sale['total_amount'].toString()) ?? 0.0;
                                     
                                     final dateString = sale['created_at'] != null 
                                       ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(sale['created_at']))

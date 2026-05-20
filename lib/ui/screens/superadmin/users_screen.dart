@@ -3,10 +3,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
+import 'package:pc_dev_flutter/services/signaling_service.dart';
 
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
@@ -176,9 +176,6 @@ class _UsersScreenState extends State<UsersScreen> {
         throw Exception("Tu sesión de usuario no es válida o ha expirado. Por favor, inicia sesión nuevamente.");
       }
       
-      // Neural Protocol: Use an isolated client to avoid session hijacking
-      final tempClient = SupabaseClient(AppConfig.supabaseUrl, AppConfig.supabaseAnonKey);
-      
       String? tenantId;
       if (_myProfile != null) {
         tenantId = _myProfile?['tenant_id'];
@@ -187,35 +184,189 @@ class _UsersScreenState extends State<UsersScreen> {
         tenantId = myProfileResponse?['tenant_id'];
       }
 
-      final response = await tempClient.auth.signUp(
+      // Call SignalingService REST proxy
+      await SignalingService().adminCreateUser(
+        firstName: firstName,
+        lastName: lastName,
         email: email,
         password: password,
-        data: {
-          'first_name': firstName,
-          'last_name': lastName,
-          'full_name': '$firstName $lastName'.trim(),
-          'tenant_id': tenantId,
-          'role': role,
-        },
+        role: role,
+        tenantId: tenantId,
       );
-
-      final createdUser = response.user;
-      if (createdUser == null) {
-        throw Exception("El aprovisionamiento falló: No se pudo registrar la identidad en el servicio de autenticación.");
-      }
-
-      // Force-sync the profile with the email to ensure visibility in pcdev
-      // Since we are SuperAdmin, we can upsert this record safely
-      await supabase.from('profiles').upsert({
-        'id': createdUser.id,
-        'email': email,
-        'first_name': firstName,
-        'last_name': lastName,
-        'full_name': '$firstName $lastName'.trim(),
-        'role': role,
-        'tenant_id': tenantId,
-      });
       
+      _loadData();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  void _showResetPasswordDialog(Map<String, dynamic> userMap) {
+    final t = Provider.of<LocaleProvider>(context, listen: false).t;
+    final passwordController = TextEditingController();
+    String name = userMap['full_name'] ?? '';
+    if (name.isEmpty) {
+      final first = userMap['first_name'] ?? '';
+      final last = userMap['last_name'] ?? '';
+      name = '$first $last'.trim();
+    }
+    if (name.isEmpty) name = 'Unknown Identity';
+    final email = userMap['email'] ?? 'No Email';
+    final userId = userMap['id'];
+    bool obscurePassword = true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF121212),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+          title: const Text("Reset Password", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Target: $name ($email)",
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 24),
+                TextField(
+                  controller: passwordController,
+                  obscureText: obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: "New Password",
+                    labelStyle: const TextStyle(color: Colors.white38),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword ? LucideIcons.eyeOff : LucideIcons.eye,
+                        color: Colors.white38,
+                        size: 20,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                    ),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(t('cancel'), style: const TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                if (passwordController.text.trim().length < 6) {
+                  ToastUtils.showCustomToast(context, "Password must be at least 6 characters", isError: true);
+                  return;
+                }
+                Navigator.pop(context);
+                _resetUserPassword(userId, email, passwordController.text.trim());
+              },
+              child: Text(t('save')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _resetUserPassword(String userId, String email, String newPassword) async {
+    ToastUtils.showPromiseToast(
+      context, 
+      message: "Resetting...", 
+      promise: _executePasswordReset(userId, email, newPassword), 
+      successMessage: "Password updated successfully", 
+      errorMessage: "Reset Failure"
+    );
+  }
+
+  Future<void> _executePasswordReset(String userId, String email, String newPassword) async {
+    try {
+      await SignalingService().adminResetPassword(userId, email, newPassword);
+      _loadData();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  void _showPurgeConfirmDialog(Map<String, dynamic> userMap) {
+    final t = Provider.of<LocaleProvider>(context, listen: false).t;
+    String name = userMap['full_name'] ?? '';
+    if (name.isEmpty) {
+      final first = userMap['first_name'] ?? '';
+      final last = userMap['last_name'] ?? '';
+      name = '$first $last'.trim();
+    }
+    if (name.isEmpty) name = 'Unknown Identity';
+    final email = userMap['email'] ?? 'No Email';
+    final userId = userMap['id'];
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text("Confirm Purge", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Are you sure you want to permanently delete this identity?",
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Target: $name ($email)",
+              style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "All associated telemetry and access credentials will be purged from the network. This action cannot be undone.",
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(t('cancel'), style: const TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              _purgeUser(userId, name, email);
+            },
+            child: const Text("PURGE IDENTITY"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _purgeUser(String userId, String name, String email) async {
+    ToastUtils.showPromiseToast(
+      context, 
+      message: "Purging...", 
+      promise: _executePurge(userId, name, email), 
+      successMessage: "Identity purged from network", 
+      errorMessage: "Purge Error"
+    );
+  }
+
+  Future<void> _executePurge(String userId, String name, String email) async {
+    try {
+      await SignalingService().adminPurgeUser(userId, name, email);
       _loadData();
     } catch (e) {
       rethrow;
@@ -352,8 +503,8 @@ class _UsersScreenState extends State<UsersScreen> {
                 color: const Color(0xFF1A1A1A),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Colors.white10)),
                 onSelected: (val) {
-                  if (val == 'reset') ToastUtils.showCustomToast(context, "Reset Protocol Initiated");
-                  if (val == 'delete') ToastUtils.showCustomToast(context, "Purge Protocol Initiated", isError: true);
+                  if (val == 'reset') _showResetPasswordDialog(user);
+                  if (val == 'delete') _showPurgeConfirmDialog(user);
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(value: 'reset', child: Text("Reset Password", style: TextStyle(color: Colors.white, fontSize: 12))),

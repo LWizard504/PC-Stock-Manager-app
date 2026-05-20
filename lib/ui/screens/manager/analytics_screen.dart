@@ -44,7 +44,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         if (tenantId != null) {
           final data = await _supabase
               .from('sales')
-              .select('total, profiles!seller_id(full_name), branches!branch_id(name)')
+              .select('total_amount, profiles!seller_id(full_name), branches!branch_id(name)')
               .eq('tenant_id', tenantId);
 
           final salesList = List<Map<String, dynamic>>.from(data);
@@ -54,7 +54,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           Map<String, double> branchSales = {};
 
           for (var sale in salesList) {
-            final total = double.tryParse(sale['total'].toString()) ?? 0.0;
+            final total = double.tryParse(sale['total_amount'].toString()) ?? 0.0;
             revenue += total;
 
             final seller = sale['profiles']?['full_name'] ?? 'Unknown';

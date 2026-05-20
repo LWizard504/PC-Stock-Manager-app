@@ -46,7 +46,7 @@ class SignalingService {
 
     socket = io.io(_serverUrl, io.OptionBuilder()
       .setTransports(['websocket'])
-      .setAuth({'token': token})
+      .setAuth({'token': token, 'client': 'pcdev'})
       .enableAutoConnect()
       .build());
 
@@ -124,7 +124,10 @@ class SignalingService {
 
     final response = await http.get(
       Uri.parse("$_serverUrl/get-contacts"),
-      headers: {'Authorization': 'Bearer $token'},
+      headers: {
+        'Authorization': 'Bearer $token',
+        'X-Client-Platform': 'pcdev',
+      },
     );
 
     if (response.statusCode == 200) {
@@ -141,13 +144,113 @@ class SignalingService {
 
     final response = await http.get(
       Uri.parse("$_serverUrl/get-history?chatId=$chatId&isGroup=$isGroup"),
-      headers: {'Authorization': 'Bearer $token'},
+      headers: {
+        'Authorization': 'Bearer $token',
+        'X-Client-Platform': 'pcdev',
+      },
     );
 
     if (response.statusCode == 200) {
       return json.decode(response.body);
     } else {
       throw Exception("Failed to fetch history: ${response.body}");
+    }
+  }
+
+  Future<void> adminResetPassword(String targetUserId, String email, String newPassword) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+    if (token == null) throw Exception("No auth session");
+
+    final response = await http.post(
+      Uri.parse("$_serverUrl/admin/reset-password"),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'X-Client-Platform': 'pcdev',
+      },
+      body: json.encode({
+        'target_user_id': targetUserId,
+        'email': email,
+        'new_password': newPassword,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      try {
+        final errData = json.decode(response.body);
+        throw Exception(errData['error'] ?? "Failed to reset password");
+      } catch (e) {
+        throw Exception("Failed to reset password: ${response.body}");
+      }
+    }
+  }
+
+  Future<void> adminCreateUser({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String password,
+    required String role,
+    String? tenantId,
+  }) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+    if (token == null) throw Exception("No auth session");
+
+    final response = await http.post(
+      Uri.parse("$_serverUrl/admin/create-user"),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'X-Client-Platform': 'pcdev',
+      },
+      body: json.encode({
+        'first_name': firstName,
+        'last_name': lastName,
+        'email': email,
+        'password': password,
+        'role': role,
+        'tenant_id': tenantId,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      try {
+        final errData = json.decode(response.body);
+        throw Exception(errData['error'] ?? "Failed to provision user");
+      } catch (e) {
+        throw Exception("Failed to provision user: ${response.body}");
+      }
+    }
+  }
+
+  Future<void> adminPurgeUser(String targetUserId, String targetName, String targetEmail) async {
+    final session = Supabase.instance.client.auth.currentSession;
+    final token = session?.accessToken;
+    if (token == null) throw Exception("No auth session");
+
+    final response = await http.post(
+      Uri.parse("$_serverUrl/admin/purge-user"),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'X-Client-Platform': 'pcdev',
+      },
+      body: json.encode({
+        'target_user_id': targetUserId,
+        'target_name': targetName,
+        'target_email': targetEmail,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      try {
+        final errData = json.decode(response.body);
+        throw Exception(errData['error'] ?? "Failed to purge user");
+      } catch (e) {
+        throw Exception("Failed to purge user: ${response.body}");
+      }
     }
   }
 
