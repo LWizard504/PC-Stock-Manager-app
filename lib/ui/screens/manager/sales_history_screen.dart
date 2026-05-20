@@ -82,7 +82,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.between,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -199,7 +199,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                                             "\$${total.toStringAsFixed(2)}",
                                             style: TextStyle(
                                               fontSize: 15,
-                                              fontWeight: FontWeight.black,
+                                              fontWeight: FontWeight.w900,
                                               color: total >= 0 ? Colors.greenAccent : Colors.redAccent,
                                             ),
                                           ),

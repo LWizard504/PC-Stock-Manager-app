@@ -94,7 +94,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.between,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -222,7 +222,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 children: [
                   Text(label, style: const TextStyle(fontSize: 14, color: Colors.white60)),
                   const SizedBox(height: 8),
-                  Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.black, color: Colors.white)),
+                  Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white)),
                 ],
               ),
             ),
@@ -239,7 +239,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.between,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
               Text("\$${value.toStringAsFixed(2)}", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),

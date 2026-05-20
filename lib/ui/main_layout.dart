@@ -22,6 +22,10 @@ import 'package:pc_dev_flutter/ui/screens/shared/settings_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/employee/pos_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/sales_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/admin/payments_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/manager/analytics_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/manager/sales_history_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/manager/sessions_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/it/tickets_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
@@ -183,8 +187,8 @@ class _MainLayoutState extends State<MainLayout> {
       case UserRole.superadmin:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const SuperAdminDashboardScreen()),
-          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
           SidebarItem(title: t('pricing_title'), icon: LucideIcons.dollarSign, screen: const PricingScreen()),
+          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
           SidebarItem(title: "Node Status", icon: LucideIcons.activity, screen: const NodeStatusScreen()),
           SidebarItem(title: "Downloads", icon: LucideIcons.downloadCloud, screen: const DownloadsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
@@ -194,17 +198,21 @@ class _MainLayoutState extends State<MainLayout> {
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const AdminDashboardScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
-          SidebarItem(title: "Ventas", icon: LucideIcons.receipt, screen: const SalesScreen()),
-          SidebarItem(title: "Pagos", icon: LucideIcons.creditCard, screen: const PaymentsScreen()),
+          SidebarItem(title: t('employees_title'), icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('sessions_title'), icon: LucideIcons.monitorSmartphone, screen: const SessionsScreen()),
+          SidebarItem(title: t('sales_history_title'), icon: LucideIcons.history, screen: const SalesHistoryScreen()),
+          SidebarItem(title: "Pagos y Suscripción", icon: LucideIcons.creditCard, screen: const PaymentsScreen()),
+          SidebarItem(title: "Ventas Activas", icon: LucideIcons.receipt, screen: const SalesScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];
       case UserRole.manager:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const ManagerDashboardScreen()),
+          SidebarItem(title: t('analytics_title'), icon: LucideIcons.lineChart, screen: const AnalyticsScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: "Ventas", icon: LucideIcons.history, screen: const SalesScreen()),
+          SidebarItem(title: t('sessions_title'), icon: LucideIcons.monitorSmartphone, screen: const SessionsScreen()),
+          SidebarItem(title: t('sales_history_title'), icon: LucideIcons.history, screen: const SalesHistoryScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];
@@ -212,7 +220,8 @@ class _MainLayoutState extends State<MainLayout> {
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const ITDashboardScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: t('users_title'), icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: "Restablecer Credenciales", icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('tickets_title'), icon: LucideIcons.ticket, screen: const TicketsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
         ];

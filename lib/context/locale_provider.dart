@@ -46,6 +46,11 @@ class LocaleProvider extends ChangeNotifier {
       'actions': 'Actions',
       'cancel': 'Cancel',
       'save': 'Save',
+      'analytics_title': 'Analytics',
+      'sessions_title': 'Employee Sessions',
+      'sales_history_title': 'Sales History',
+      'tickets_title': 'Support Tickets',
+      'employees_title': 'Employees',
     },
     'es': {
       'app_title': 'StockManager',
@@ -67,6 +72,11 @@ class LocaleProvider extends ChangeNotifier {
       'actions': 'Acciones',
       'cancel': 'Cancelar',
       'save': 'Guardar',
+      'analytics_title': 'Analíticas',
+      'sessions_title': 'Sesiones',
+      'sales_history_title': 'Historial Ventas',
+      'tickets_title': 'Soporte y Tickets',
+      'employees_title': 'Colaboradores',
     }
   };
 

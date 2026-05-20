@@ -34,14 +34,13 @@ class _TicketsScreenState extends State<TicketsScreen> {
     try {
       var query = _supabase
           .from('tickets')
-          .select('*, creator:profiles!creator_id(full_name, email, tenants(name))')
-          .order('created_at', ascending: false);
+          .select('*, creator:profiles!creator_id(full_name, email, tenants(name))');
 
       if (_statusFilter != "all") {
         query = query.eq('status', _statusFilter);
       }
 
-      final data = await query;
+      final data = await query.order('created_at', ascending: false);
       setState(() {
         _tickets = List<Map<String, dynamic>>.from(data);
         if (_selectedTicket != null) {
@@ -103,7 +102,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.between,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,12 +262,12 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                 children: [
                                   Text(
                                     "ANÁLISIS DE TICKET",
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.black, color: AppTheme.primaryColor, letterSpacing: 2),
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppTheme.primaryColor, letterSpacing: 2),
                                   ),
                                   const SizedBox(height: 16),
                                   Text(
                                     _selectedTicket!['title'] ?? 'Sin Título',
-                                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.black, color: Colors.white),
+                                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white),
                                   ),
                                   const SizedBox(height: 24),
                                   Container(
@@ -287,7 +286,7 @@ class _TicketsScreenState extends State<TicketsScreen> {
                                   const SizedBox(height: 32),
                                   const Text(
                                     "ACCIONES TÉCNICAS",
-                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.black, color: Colors.white38, letterSpacing: 1.5),
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white38, letterSpacing: 1.5),
                                   ),
                                   const SizedBox(height: 16),
                                   if (_selectedTicket!['status'] != 'resolved')
