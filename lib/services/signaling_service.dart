@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/services/config.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:window_manager/window_manager.dart';
 
 class SignalingService {
   static final SignalingService _instance = SignalingService._internal();
@@ -79,6 +80,7 @@ class SignalingService {
     socket!.on('signal', (data) {
       if (onSignal != null) onSignal!(Map<String, dynamic>.from(data));
       if (data['payload'] != null && data['payload']['offer'] != null) {
+        _wakeupWindow();
         if (onIncomingCall != null) onIncomingCall!(Map<String, dynamic>.from(data));
       }
     });
@@ -318,6 +320,27 @@ class SignalingService {
     socket!.emit('register', {
       'groups': groupIds,
     });
+  }
+
+  void _wakeupWindow() async {
+    try {
+      debugPrint('SignalingService: Waking up window for incoming call...');
+      final isMin = await windowManager.isMinimized();
+      if (isMin) {
+        await windowManager.restore();
+      }
+      final isVis = await windowManager.isVisible();
+      if (!isVis) {
+        await windowManager.show();
+      }
+      await windowManager.focus();
+      // Force window to front by toggling setAlwaysOnTop temporarily
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setAlwaysOnTop(false);
+      debugPrint('SignalingService: Window brought to front successfully.');
+    } catch (e) {
+      debugPrint('SignalingService: Error waking up window: $e');
+    }
   }
 
   void disconnect() {
