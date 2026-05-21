@@ -221,23 +221,43 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       if (event.track.kind == 'audio') {
         event.track.enabled = true;
       }
-      if (event.track.kind == 'video' || event.track.kind == 'audio') {
-        if (!_remoteParticipants.containsKey(remoteUserId)) {
-          final renderer = RTCVideoRenderer();
-          await renderer.initialize();
-          renderer.srcObject = event.streams[0];
-          
-          if (mounted) {
-            setState(() {
-              _remoteParticipants[remoteUserId] = Participant(
-                id: remoteUserId,
-                name: remoteUserName,
-                avatar: remoteAvatar,
-                renderer: renderer,
-              );
-              _inCall = true;
-            });
+
+      MediaStream? remoteStream;
+      if (event.streams.isNotEmpty) {
+        remoteStream = event.streams[0];
+      } else {
+        // Fallback: create a local stream container and add the track
+        remoteStream = await createLocalMediaStream('remote_${remoteUserId}');
+        await remoteStream.addTrack(event.track);
+      }
+
+      if (!_remoteParticipants.containsKey(remoteUserId)) {
+        final renderer = RTCVideoRenderer();
+        await renderer.initialize();
+        renderer.srcObject = remoteStream;
+        if (mounted) {
+          setState(() {
+            _remoteParticipants[remoteUserId] = Participant(
+              id: remoteUserId,
+              name: remoteUserName,
+              avatar: remoteAvatar,
+              renderer: renderer,
+            );
+            _inCall = true;
+          });
+        }
+      } else {
+        // Participant exists, append track to existing stream to support multiple track events
+        final existingRenderer = _remoteParticipants[remoteUserId]!.renderer;
+        final existingStream = existingRenderer.srcObject;
+        if (existingStream != null) {
+          final tracks = existingStream.getTracks();
+          if (!tracks.any((t) => t.id == event.track.id)) {
+            await existingStream.addTrack(event.track);
+            existingRenderer.srcObject = existingStream; // Force refresh
           }
+        } else {
+          existingRenderer.srcObject = remoteStream;
         }
       }
     };

@@ -165,18 +165,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     };
 
-    _signaling.onIncomingCall = (payload) {
-      if (mounted) {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
-          contact: payload['from'],
-          roomId: payload['roomId'] ?? 'direct_call_${payload['from']['id']}',
-          isVideo: payload['type'] == 'video',
-          isIncoming: true,
-          isGroup: payload['isGroup'] ?? false,
-          initialOffer: payload['payload']['offer'],
-        )));
-      }
-    };
+
 
     // 3. Realtime Fallback (Supabase)
     _supabase.channel('neural-chat-fallback')

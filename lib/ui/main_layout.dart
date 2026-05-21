@@ -31,6 +31,7 @@ import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
 import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/call_screen.dart';
 
 class SidebarItem {
   final String title;
@@ -152,6 +153,18 @@ class _MainLayoutState extends State<MainLayout> {
       }
     }
     SignalingService().init();
+    SignalingService().onIncomingCall = (payload) {
+      if (mounted) {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
+          contact: Map<String, dynamic>.from(payload['from']),
+          roomId: payload['roomId'] ?? 'direct_call_${payload['from']['id']}',
+          isVideo: payload['type'] == 'video',
+          isIncoming: true,
+          isGroup: payload['isGroup'] ?? false,
+          initialOffer: payload['payload']['offer'],
+        )));
+      }
+    };
   }
 
   void _enforceWindowRules(UserRole role) async {
