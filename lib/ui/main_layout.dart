@@ -30,6 +30,7 @@ import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
 import 'package:pc_dev_flutter/services/config.dart';
+import 'package:pc_dev_flutter/services/signaling_service.dart';
 
 class SidebarItem {
   final String title;
@@ -150,6 +151,7 @@ class _MainLayoutState extends State<MainLayout> {
         _enforceWindowRules(UserRole.admin);
       }
     }
+    SignalingService().init();
   }
 
   void _enforceWindowRules(UserRole role) async {
@@ -175,6 +177,7 @@ class _MainLayoutState extends State<MainLayout> {
   }
 
   void _signOut() async {
+    SignalingService().disconnect();
     _enforceWindowRules(UserRole.admin);
     await Supabase.instance.client.auth.signOut();
     if (mounted) {
