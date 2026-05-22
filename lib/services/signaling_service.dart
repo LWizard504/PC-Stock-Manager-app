@@ -29,11 +29,6 @@ class SignalingService {
   Function(String, String)? onMessageSent;
 
   Future<void> init({List<String> groupIds = const []}) async {
-    if (socket != null && socket!.connected) {
-      debugPrint('SignalingService: Socket already connected, skipping init');
-      return;
-    }
-
     final supabase = Supabase.instance.client;
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -41,15 +36,31 @@ class SignalingService {
       return;
     }
 
+    if (socket != null) {
+      debugPrint('SignalingService: Disconnecting and disposing existing socket for fresh init...');
+      try {
+        socket!.disconnect();
+        socket!.dispose();
+      } catch (e) {
+        debugPrint('SignalingService: Error disposing socket in init: $e');
+      }
+      socket = null;
+    }
+
     final session = supabase.auth.currentSession;
     final token = session?.accessToken;
     debugPrint('SignalingService: Initializing socket with token: ${token?.substring(0, 10)}...');
 
-    socket = io.io(_serverUrl, io.OptionBuilder()
+    final options = io.OptionBuilder()
       .setTransports(['websocket'])
       .setAuth({'token': token, 'client': 'pcdev'})
+      .enableForceNewConnection()
+      .disableMultiplex()
       .enableAutoConnect()
-      .build());
+      .build();
+
+    socket = io.io(_serverUrl, options);
+    socket!.connect();
 
     socket!.onConnect((_) {
       debugPrint('SignalingService: Socket Connected. ID: ${socket!.id}');
@@ -344,7 +355,15 @@ class SignalingService {
   }
 
   void disconnect() {
-    socket?.disconnect();
-    socket = null;
+    if (socket != null) {
+      debugPrint('SignalingService: Disconnecting and disposing socket...');
+      try {
+        socket!.disconnect();
+        socket!.dispose();
+      } catch (e) {
+        debugPrint('SignalingService: Error disposing socket in disconnect: $e');
+      }
+      socket = null;
+    }
   }
 }
