@@ -218,9 +218,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
     pc.onTrack = (event) async {
       debugPrint("CallScreen: Received remote track: ${event.track.kind}");
-      if (event.track.kind == 'audio') {
-        event.track.enabled = true;
-      }
+      event.track.enabled = true;
 
       MediaStream? remoteStream;
       if (event.streams.isNotEmpty) {
@@ -230,6 +228,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
         remoteStream = await createLocalMediaStream('remote_${remoteUserId}');
         await remoteStream.addTrack(event.track);
       }
+
+      final isVideo = event.track.kind == 'video';
+      final isAudio = event.track.kind == 'audio';
 
       if (!_remoteParticipants.containsKey(remoteUserId)) {
         final renderer = RTCVideoRenderer();
@@ -242,22 +243,44 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               name: remoteUserName,
               avatar: remoteAvatar,
               renderer: renderer,
+              isVideoEnabled: isVideo ? true : widget.isVideo,
+              isAudioEnabled: isAudio ? true : true,
             );
             _inCall = true;
           });
         }
       } else {
         // Participant exists, append track to existing stream to support multiple track events
-        final existingRenderer = _remoteParticipants[remoteUserId]!.renderer;
+        final participant = _remoteParticipants[remoteUserId]!;
+        final existingRenderer = participant.renderer;
         final existingStream = existingRenderer.srcObject;
+
+        if (mounted) {
+          setState(() {
+            if (isVideo) {
+              participant.isVideoEnabled = true;
+            }
+            if (isAudio) {
+              participant.isAudioEnabled = true;
+            }
+          });
+        }
+
         if (existingStream != null) {
           final tracks = existingStream.getTracks();
           if (!tracks.any((t) => t.id == event.track.id)) {
             await existingStream.addTrack(event.track);
-            existingRenderer.srcObject = existingStream; // Force refresh
+          }
+          // Always re-assign the srcObject and trigger setState to force video renderer refresh
+          existingRenderer.srcObject = existingStream;
+          if (mounted) {
+            setState(() {});
           }
         } else {
           existingRenderer.srcObject = remoteStream;
+          if (mounted) {
+            setState(() {});
+          }
         }
       }
     };
