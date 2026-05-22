@@ -84,7 +84,7 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         final responseBody = await response.transform(utf8.decoder).join();
         
         // Extraer la versión de config.dart remota con Regex
-        final regExp = RegExp(r"static\s+const\s+String\s+appVersion\s*=\s*['\"']([^'\"']+)['\"']");
+        final regExp = RegExp(r'''static\s+const\s+String\s+appVersion\s*=\s*['"]([^'"]+)['"]''');
         final match = regExp.firstMatch(responseBody);
         
         if (match != null) {
