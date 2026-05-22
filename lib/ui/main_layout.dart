@@ -154,6 +154,28 @@ class _MainLayoutState extends State<MainLayout> {
     }
     SignalingService().init();
     SignalingService().onIncomingCall = (payload) {
+      if (_currentUser?.role != UserRole.superadmin) {
+        debugPrint("Blocking incoming call: current user is not superadmin.");
+        final fromId = payload['from']?['id'] ?? '';
+        final isGroup = payload['isGroup'] == true;
+        SignalingService().sendHangup(
+          isGroup ? (payload['groupId'] ?? fromId) : fromId,
+          _currentUser?.id ?? '',
+          senderName: _currentUser?.name ?? 'Employee',
+          status: 'rejected',
+          isGroup: isGroup,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Llamada entrante bloqueada: Las llamadas solo están permitidas para SuperAdmins."),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
       if (mounted) {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
           contact: Map<String, dynamic>.from(payload['from']),

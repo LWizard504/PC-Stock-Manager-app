@@ -32,6 +32,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _myTenantId;
   String? _myName;
   String? _myAvatar;
+  String? _myRole;
   RealtimeChannel? _presenceChannel;
   String? _remoteTypingStatus;
   Timer? _typingTimer;
@@ -280,6 +281,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _myTenantId = myProfile['tenant_id'];
           _myName = myProfile['full_name'] ?? 'Neural Node';
           _myAvatar = myProfile['avatar_url'];
+          _myRole = myProfile['role']?.toString().toLowerCase();
           
           _contacts = List<Map<String, dynamic>>.from(data['contacts'] ?? []);
           _groups = List<Map<String, dynamic>>.from((data['groups'] as List? ?? []).map((g) => {
@@ -573,32 +575,34 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           const SizedBox(width: 16),
-          IconButton(
-            icon: const Icon(LucideIcons.phone, size: 20, color: Colors.white70), 
-            onPressed: () {
-              final isGroup = _selectedContact!['isGroup'] == true;
-              final roomId = isGroup ? _selectedContact!['id'] : 'call_${_myId}_${_selectedContact!['id']}';
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
-                contact: _selectedContact!, 
-                roomId: roomId, 
-                isVideo: false,
-                isGroup: isGroup,
-              )));
-            }
-          ),
-          IconButton(
-            icon: const Icon(LucideIcons.video, size: 20, color: Colors.white70), 
-            onPressed: () {
-              final isGroup = _selectedContact!['isGroup'] == true;
-              final roomId = isGroup ? _selectedContact!['id'] : 'call_${_myId}_${_selectedContact!['id']}';
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
-                contact: _selectedContact!, 
-                roomId: roomId, 
-                isVideo: true,
-                isGroup: isGroup,
-              )));
-            }
-          ),
+          if (_myRole == 'superadmin') ...[
+            IconButton(
+              icon: const Icon(LucideIcons.phone, size: 20, color: Colors.white70), 
+              onPressed: () {
+                final isGroup = _selectedContact!['isGroup'] == true;
+                final roomId = isGroup ? _selectedContact!['id'] : 'call_${_myId}_${_selectedContact!['id']}';
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
+                  contact: _selectedContact!, 
+                  roomId: roomId, 
+                  isVideo: false,
+                  isGroup: isGroup,
+                )));
+              }
+            ),
+            IconButton(
+              icon: const Icon(LucideIcons.video, size: 20, color: Colors.white70), 
+              onPressed: () {
+                final isGroup = _selectedContact!['isGroup'] == true;
+                final roomId = isGroup ? _selectedContact!['id'] : 'call_${_myId}_${_selectedContact!['id']}';
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => CallScreen(
+                  contact: _selectedContact!, 
+                  roomId: roomId, 
+                  isVideo: true,
+                  isGroup: isGroup,
+                )));
+              }
+            ),
+          ],
         ],
       ),
     );

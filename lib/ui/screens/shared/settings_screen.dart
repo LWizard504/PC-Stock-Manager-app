@@ -6,6 +6,8 @@ import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
+import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -64,7 +66,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _logout() async {
+    SignalingService().disconnect();
     await _supabase.auth.signOut();
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    }
   }
 
   void _showEditProfile() {
