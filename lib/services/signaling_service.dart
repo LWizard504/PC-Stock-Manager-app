@@ -16,6 +16,21 @@ class SignalingService {
   
   final ValueNotifier<Set<String>> onlineUsersNotifier = ValueNotifier<Set<String>>({});
   
+  // Cached profile to avoid repeated DB queries in signaling hot path
+  Map<String, dynamic>? _cachedProfile;
+  
+  Future<Map<String, dynamic>> getCachedProfile() async {
+    if (_cachedProfile != null) return _cachedProfile!;
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    if (user == null) throw Exception("No auth session");
+    final data = await supabase.from('profiles').select('full_name, avatar_url, tenant_id, role').eq('id', user.id).single();
+    _cachedProfile = Map<String, dynamic>.from(data);
+    return _cachedProfile!;
+  }
+  
+  void invalidateProfileCache() { _cachedProfile = null; }
+  
   // Callbacks for UI updates
   Function(Map<String, dynamic>)? onNewMessage;
   Function(Map<String, dynamic>)? onIncomingCall;
@@ -65,7 +80,7 @@ class SignalingService {
     socket!.onConnect((_) {
       debugPrint('SignalingService: Socket Connected. ID: ${socket!.id}');
       socket!.emit('get-online-users');
-      // Neural Protocol: Only send groups, server derives userId from token
+      // Only send groups, server derives userId from token
       debugPrint('SignalingService: Emitting register with groups: $groupIds');
       socket!.emit('register', { 'groups': groupIds });
     });

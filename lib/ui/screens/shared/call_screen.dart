@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -70,20 +69,18 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   final _signaling = SignalingService();
   final _supabase = Supabase.instance.client;
 
-  // Neural Aesthetics & Animation
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
   String _callStatus = 'connecting';
   DateTime? _callStartTime;
-  Timer? _neuralTelemetryTimer;
+  Timer? _statsTimer;
 
   @override
   void initState() {
     super.initState();
     _isVideoMuted = !widget.isVideo;
     
-    // Pulse Animation for Incoming Calls
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -101,7 +98,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
     _pulseController.dispose();
     _stopStatsTimer();
     
-    // Neural Node Cleanup: Prevent signaling callbacks from firing on disposed screen
     _signaling.onSignal = null;
     _signaling.onHangup = null;
     
@@ -345,7 +341,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
 
   Future<void> _sendSignal(String event, Map<String, dynamic> payload, String targetId) async {
     final myId = _supabase.auth.currentUser?.id;
-    final myProfile = await _supabase.from('profiles').select('full_name, avatar_url').eq('id', myId!).single();
+    final myProfile = await _signaling.getCachedProfile();
 
     final from = {
       'id': myId,
@@ -353,7 +349,6 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
       'avatar': myProfile['avatar_url'],
     };
 
-    // Send via Signaling API (Socket.io) for parity and visibility
     _signaling.sendSignal(
       targetId, 
       payload, 
@@ -526,7 +521,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 32),
             Text(
-              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
+              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Contacto').toUpperCase(),
               style: GoogleFonts.outfit(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
             ),
             const SizedBox(height: 12),
@@ -723,7 +718,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 48),
             Text(
-              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Neural Node').toUpperCase(),
+              (widget.contact['full_name'] ?? widget.contact['name'] ?? 'Contacto').toUpperCase(),
               style: GoogleFonts.outfit(fontSize: 32, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1),
             ),
             const SizedBox(height: 8),
@@ -812,8 +807,9 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _startStatsTimer() {
-    _neuralTelemetryTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
-      for (var entry in _peerConnections.entries) {
+    _statsTimer = Timer.periodic(const Duration(seconds: 8), (timer) async {
+      final entries = _peerConnections.entries.take(1);
+      for (var entry in entries) {
         try {
           final stats = await entry.value.getStats();
           for (var report in stats) {
@@ -835,7 +831,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
   }
 
   void _stopStatsTimer() {
-    _neuralTelemetryTimer?.cancel();
-    _neuralTelemetryTimer = null;
+    _statsTimer?.cancel();
+    _statsTimer = null;
   }
 }

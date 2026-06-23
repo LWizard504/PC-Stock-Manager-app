@@ -79,10 +79,11 @@ class _POSScreenState extends State<POSScreen> {
 
   void _setupRealtime() {
     final supabase = Supabase.instance.client;
+    final tenantId = _myProfile?['tenant_id'];
     _channel = supabase.channel('employee-pos-products');
     _channel!
-      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'products', callback: (payload) => _fetchProducts())
-      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'inventory', callback: (payload) => _fetchProducts())
+      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'products', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'tenant_id', value: tenantId), callback: (payload) => _fetchProducts())
+      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'inventory', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'tenant_id', value: tenantId), callback: (payload) => _fetchProducts())
       .subscribe();
   }
 
@@ -277,6 +278,33 @@ class _POSScreenState extends State<POSScreen> {
   Future<void> _processCheckout() async {
     final activeCart = _cart.where((c) => c['qty'] > 0).toList();
     if (activeCart.isEmpty || _total <= 0) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+        title: const Text("Confirmar Venta", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("${activeCart.length} artículo(s) en el carrito", style: const TextStyle(color: Colors.white70)),
+            const SizedBox(height: 8),
+            Text("Total: \$${_total.toStringAsFixed(2)}", style: const TextStyle(color: Colors.red, fontSize: 24, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Confirmar Venta", style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
     
     setState(() => _isProcessing = true);
     

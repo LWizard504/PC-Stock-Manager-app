@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -6,6 +7,7 @@ import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/skeleton_loader.dart';
+import 'package:pc_dev_flutter/ui/widgets/error_state_widget.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -22,16 +24,23 @@ class _InventoryScreenState extends State<InventoryScreen> {
   String _title = "Cargando...";
   Map<String, dynamic>? _myProfile;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _searchController.addListener(_filterInventory);
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), _filterInventory);
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -498,7 +507,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         child: SkeletonLoader.table(rows: 6, columns: 7),
                       )
                     else if (_filteredItems.isEmpty)
-                      const Center(child: Padding(padding: EdgeInsets.all(64), child: Text("No hay productos disponibles", style: TextStyle(color: Colors.white24))))
+                      const EmptyStateWidget(message: "No hay productos disponibles", icon: LucideIcons.package)
                     else
                       _buildInventoryTable(context),
                   ],

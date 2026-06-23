@@ -147,18 +147,31 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         Directory(updateDir).createSync(recursive: true);
       }
 
+      const expectedRepo = 'https://github.com/LWizard504/PC-Stock-Manager-app';
+      const expectedRepoCanonical = 'github.com/LWizard504/PC-Stock-Manager-app';
+
       if (!buildDir.existsSync()) {
         buildDir.createSync(recursive: true);
         _addLog("Clonando repositorio principal desde GitHub...");
         final cloneProcess = await Process.start(
           'git',
-          ['clone', 'https://github.com/LWizard504/PC-Stock-Manager-app', '.'],
+          ['clone', expectedRepo, '.'],
           workingDirectory: buildPath,
         );
 
         await _pipeProcessOutput(cloneProcess, "Git Clone");
       } else {
-        _addLog("Repositorio detectado. Sincronizando últimas ramas...");
+        _addLog("Repositorio detectado. Verificando origen...");
+        final checkOrigin = await Process.run(
+          'git',
+          ['remote', 'get-url', 'origin'],
+          workingDirectory: buildPath,
+        );
+        final originUrl = checkOrigin.stdout.toString().trim();
+        if (!originUrl.contains(expectedRepoCanonical)) {
+          throw Exception("Origen del repositorio no coincide con el esperado: $originUrl");
+        }
+        _addLog("Origen verificado. Sincronizando últimas ramas...");
         final pullProcess = await Process.start(
           'git',
           ['pull'],

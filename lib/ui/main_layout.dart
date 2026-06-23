@@ -211,9 +211,69 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
+  void _showProfileMenu(BuildContext context) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => GestureDetector(
+        onTap: () => entry.remove(),
+        behavior: HitTestBehavior.opaque,
+        child: Material(
+          color: Colors.transparent,
+          child: Stack(
+            children: [
+              Positioned(
+                left: _isExpanded ? 76 : 24,
+                top: 180,
+                child: Container(
+                  width: 200,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Text(_currentUser?.email ?? '', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                      ),
+                      const Divider(color: Colors.white10),
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(LucideIcons.settings, size: 18, color: Colors.white70),
+                        title: const Text('Ajustes', style: TextStyle(fontSize: 13)),
+                        onTap: () { entry.remove(); setState(() => _selectedIndex = _getSidebarItemsForRole(_currentUser!.role, (s) => s).length - 1); },
+                      ),
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(LucideIcons.logOut, size: 18, color: Colors.redAccent),
+                        title: const Text('Cerrar Sesión', style: TextStyle(fontSize: 13, color: Colors.redAccent)),
+                        onTap: () { entry.remove(); _signOut(); },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+  }
+
   void _signOut() async {
     SignalingService().disconnect();
-    _enforceWindowRules(UserRole.admin);
+    await windowManager.setFullScreen(false);
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setClosable(true);
+    await windowManager.setMinimizable(true);
+    await windowManager.setMaximizable(true);
+    await windowManager.setSkipTaskbar(false);
     await Supabase.instance.client.auth.signOut();
     if (mounted) {
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
@@ -481,7 +541,7 @@ class _MainLayoutState extends State<MainLayout> {
           // User Profile Area
           InkWell(
             onTap: () {
-              // Show profile options or logout
+              _showProfileMenu(context);
             },
             borderRadius: BorderRadius.circular(12),
             child: AnimatedContainer(

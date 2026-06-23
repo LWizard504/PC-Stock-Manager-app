@@ -6,6 +6,8 @@ import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/main_layout.dart';
 import 'package:pc_dev_flutter/ui/screens/auth_assistant_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
 
@@ -22,6 +24,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   bool _rememberMe = false;
+  int _attempts = 0;
+  DateTime? _lockoutUntil;
 
   @override
   void initState() {
@@ -47,7 +51,35 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  bool _isRateLimited() {
+    if (_lockoutUntil == null) return false;
+    if (DateTime.now().isAfter(_lockoutUntil!)) {
+      _lockoutUntil = null;
+      _attempts = 0;
+      return false;
+    }
+    return true;
+  }
+
+  void _recordFailedAttempt() {
+    _attempts++;
+    if (_attempts >= 5) {
+      _lockoutUntil = DateTime.now().add(const Duration(minutes: 1));
+    }
+  }
+
   void _handleLogin() async {
+    if (_isRateLimited()) {
+      final remaining = _lockoutUntil!.difference(DateTime.now()).inSeconds + 1;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Demasiados intentos. Espera $remaining segundos.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+      return;
+    }
+
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
@@ -65,6 +97,9 @@ class _LoginScreenState extends State<LoginScreen> {
       ).timeout(const Duration(seconds: 8));
       
       if (mounted && response.user != null) {
+        _attempts = 0;
+        _lockoutUntil = null;
+        
         if (_rememberMe) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('remembered_email', email);
@@ -87,6 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
     } on AuthException catch (e) {
+      _recordFailedAttempt();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message), backgroundColor: Colors.red));
       }
@@ -95,6 +131,9 @@ class _LoginScreenState extends State<LoginScreen> {
       
       final offlineProfile = await OfflineSyncManager.instance.authenticateOffline(email, password);
       if (offlineProfile != null) {
+        _attempts = 0;
+        _lockoutUntil = null;
+        
         if (_rememberMe) {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('remembered_email', email);
@@ -109,6 +148,7 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         }
       } else {
+        _recordFailedAttempt();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Error de conexión y no hay credenciales locales para este usuario'), backgroundColor: Colors.red),
@@ -134,20 +174,30 @@ class _LoginScreenState extends State<LoginScreen> {
                 Positioned(
                   top: 24,
                   right: 24,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(LucideIcons.languages, size: 16, color: Colors.white70),
-                        SizedBox(width: 8),
-                        Text("English", style: TextStyle(color: Colors.white70, fontSize: 14)),
-                        Icon(LucideIcons.chevronDown, size: 16, color: Colors.white70),
-                      ],
+                  child: GestureDetector(
+                    onTap: () {
+                      final localeProvider = context.read<LocaleProvider>();
+                      final current = localeProvider.locale.languageCode;
+                      localeProvider.setLocale(Locale(current == 'en' ? 'es' : 'en'));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(LucideIcons.languages, size: 16, color: Colors.white70),
+                          const SizedBox(width: 8),
+                          Text(
+                            context.watch<LocaleProvider>().locale.languageCode == 'en' ? "English" : "Español",
+                            style: const TextStyle(color: Colors.white70, fontSize: 14),
+                          ),
+                          const Icon(LucideIcons.chevronDown, size: 16, color: Colors.white70),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -331,7 +381,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             width: double.infinity,
                             height: 52,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : _handleLogin,
+                              onPressed: (_isLoading || _isRateLimited()) ? null : _handleLogin,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.red,
                                 foregroundColor: Colors.white,

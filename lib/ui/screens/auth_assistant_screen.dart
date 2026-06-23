@@ -3,7 +3,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
-import 'dart:math';
 
 enum AuthMode { register, forgotPassword }
 
@@ -127,36 +126,38 @@ class _AuthAssistantScreenState extends State<AuthAssistantScreen> {
   }
 
   Future<void> _checkUserExists() async {
-    // In this demo/app, we'll try to find a profile or use a mock check.
-    // Real check would be an RPC.
-    bool exists = true; // Simulating check for demo purposes
-    
-    // Attempt real check if possible (e.g. check if a profile exists)
-    // Note: This might fail due to RLS, so we handle it gracefully.
-    
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('id')
+          .eq('email', _email!)
+          .maybeSingle();
 
-    if (exists) {
-      _addAiMessage("Usuario localizado. Para confirmar que eres el titular del nodo, ingresa la Licencia de tu Organización.");
-      _step = 1;
-    } else {
-      _addAiMessage("No encuentro ningún usuario registrado con el correo $_email en nuestra red.");
-      _addAiMessage("¿Deseas que iniciemos el proceso para crear una cuenta nueva ahora mismo?");
-      // We could add buttons here, for now we wait for "si/no"
+      if (profile != null) {
+        _addAiMessage("Usuario localizado. Para confirmar que eres el titular del nodo, ingresa la Licencia de tu Organización.");
+        _step = 1;
+      } else {
+        _addAiMessage("No encuentro ningún usuario registrado con el correo $_email en nuestra red.");
+        _addAiMessage("Verifica que el correo sea correcto o contacta a tu administrador.");
+      }
+    } catch (e) {
+      _addAiMessage("Error de conexión al verificar el usuario. Intenta de nuevo más tarde.");
     }
   }
 
   Future<void> _verifyLicenseAndReset() async {
     _addAiMessage("Verificando vinculación de licencia...");
     
-    await Future.delayed(const Duration(seconds: 1));
-    
-    if (_licenseKey == "STK-DEMO-2026-BETA" || _licenseKey!.startsWith("STK-")) {
-      try {
-        // 1. Trigger real Supabase Password Reset (Sends real email via Supabase SMTP)
+    try {
+      final tenant = await Supabase.instance.client
+          .from('tenants')
+          .select('id, name')
+          .eq('license_key', _licenseKey!)
+          .maybeSingle();
+
+      if (tenant != null) {
         await Supabase.instance.client.auth.resetPasswordForEmail(_email!);
         
-        // 2. Create Audit Log
         await Supabase.instance.client.from('audit_logs').insert({
           'action': 'PASSWORD_RESET_REQUEST',
           'severity': 'WARNING',
@@ -170,32 +171,19 @@ class _AuthAssistantScreenState extends State<AuthAssistantScreen> {
         _addAiMessage("¡Identidad confirmada! He activado el protocolo de recuperación.");
         _addAiMessage("He enviado un correo electrónico real a $_email con las instrucciones para restablecer tu acceso.");
         _addAiMessage("Por favor, revisa tu bandeja de entrada (y la carpeta de spam) para completar el proceso.");
-        _step = 3; // Finished
-      } catch (e) {
-        _addAiMessage("Error al procesar la solicitud. Asegúrate de que el correo esté registrado.");
+        _step = 3;
+      } else {
+        _addAiMessage("La licencia proporcionada no coincide con los registros de este usuario.");
       }
-    } else {
-      _addAiMessage("La licencia proporcionada no coincide con los registros de este usuario.");
+    } catch (e) {
+      _addAiMessage("Error al procesar la solicitud. Asegúrate de que el correo esté registrado.");
     }
-  }
-
-  String _generateTempPassword() {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789!@#%^&*';
-    return List.generate(8, (index) => chars[Random().nextInt(chars.length)]).join().toUpperCase();
   }
 
   // --- COMUN ---
   Future<void> _verifyLicenseAndRegister() async {
     _addAiMessage("Verificando licencia...");
     
-    if (_licenseKey == "STK-DEMO-2026-BETA") {
-      _tenantId = "00000000-0000-0000-0000-000000000000";
-      _addAiMessage("Licencia de Desarrollador detectada. Nodo: Stakia Dev Cloud.");
-      _step = 2;
-      _addAiMessage("Finalmente, define la contraseña para tu nueva cuenta.");
-      return;
-    }
-
     try {
       final response = await Supabase.instance.client
           .from('tenants')
@@ -212,7 +200,7 @@ class _AuthAssistantScreenState extends State<AuthAssistantScreen> {
         _addAiMessage("Finalmente, define la contraseña para tu nueva cuenta.");
       }
     } catch (e) {
-      _addAiMessage("Error de conexión. Asegúrate de que las políticas de RLS permitan la verificación o usa la licencia STK-DEMO-2026-BETA.");
+      _addAiMessage("Error de conexión. Asegúrate de que las políticas de RLS permitan la verificación.");
     }
   }
 
@@ -261,7 +249,7 @@ class _AuthAssistantScreenState extends State<AuthAssistantScreen> {
           children: [
             const Icon(LucideIcons.bot, color: Colors.red),
             const SizedBox(width: 12),
-            Text(_currentMode == AuthMode.register ? "Activación Neural" : "Recuperación de Acceso", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(_currentMode == AuthMode.register ? "Activación de Cuenta" : "Recuperación de Acceso", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
       ),

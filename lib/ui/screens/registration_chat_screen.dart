@@ -158,7 +158,7 @@ class _RegistrationChatScreenState extends State<RegistrationChatScreen> {
           children: [
             Icon(LucideIcons.bot, color: Colors.red),
             SizedBox(width: 12),
-            Text("Asistente Neural", style: TextStyle(fontWeight: FontWeight.bold)),
+            Text("Asistente de Registro", style: TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
       ),

@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:intl/intl.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/call_screen.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/ui/widgets/error_state_widget.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -42,7 +42,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _myId = _supabase.auth.currentUser?.id;
-    _setupRealtime(); // Neural Node: Init signaling immediately to bypass RLS blockers
+      _setupRealtime();
     _fetchContacts(); 
     _messageController.addListener(_onMessageChanged);
   }
@@ -50,8 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _setupRealtime() {
     if (_myId == null) return;
 
-    // 1. Supabase Presence Channel (Global)
-    _presenceChannel = _supabase.channel('neural-global-presence');
+    _presenceChannel = _supabase.channel('global-presence');
     _presenceChannel!.subscribe((status, [error]) {
       if (status == RealtimeSubscribeStatus.subscribed) {
         _presenceChannel!.track({
@@ -74,7 +73,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final fromData = data['from'];
       final senderId = fromData is Map ? fromData['id'] : (data['sender_id'] ?? data['from'] ?? data['senderId']);
       
-      // Neural Mapping: Normalize signaling API fields to Chat UI model
+
       final msg = {
         'id': data['id'] ?? data['tempId'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
         'sender_id': senderId,
@@ -168,8 +167,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
 
 
-    // 3. Realtime Fallback (Supabase)
-    _supabase.channel('neural-chat-fallback')
+    _supabase.channel('chat-fallback')
       .onPostgresChanges(
         event: PostgresChangeEvent.insert,
         schema: 'public',
@@ -197,7 +195,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Heartbeat update
     _supabase.from('profiles').update({
       'last_seen_at': DateTime.now().toIso8601String(),
-    }).eq('id', _myId!).then((_) {}).catchError((e) => debugPrint("Presence update error: $e"));
+    }).eq('id', _myId!).then((_) {}).catchError((e) { debugPrint("Presence update error: $e"); });
   }
 
   bool _isTargetChat(dynamic senderId, bool isGroup, dynamic groupId) {
@@ -279,7 +277,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         setState(() {
           _myTenantId = myProfile['tenant_id'];
-          _myName = myProfile['full_name'] ?? 'Neural Node';
+          _myName = myProfile['full_name'] ?? 'Usuario';
           _myAvatar = myProfile['avatar_url'];
           _myRole = myProfile['role']?.toString().toLowerCase();
           
@@ -293,15 +291,12 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
 
-      // Neural Protocol: Register groups with Signaling API for real-time routing
       _signaling.register(_myId!, _groups.map((g) => g['id'].toString()).toList());
-
     } catch (e) {
       debugPrint("ChatScreen Fatal Error fetching contacts via proxy: $e");
       if (mounted) setState(() => _isLoadingContacts = false);
     }
   }
-
 
   Future<void> _fetchMessages(Map<String, dynamic> contact) async {
     setState(() {
@@ -419,16 +414,18 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Mensajería Neural", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                const Text("Mensajería", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 8),
-                Text("Red de Nodos Activos", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12)),
+                Text("Red de Contactos Activos", style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12)),
               ],
             ),
           ),
           Expanded(
             child: _isLoadingContacts
               ? const Center(child: CircularProgressIndicator(color: Colors.red))
-              : ListView(
+              : (_contacts.isEmpty && _groups.isEmpty)
+                ? const EmptyStateWidget(message: "No hay contactos disponibles", icon: LucideIcons.users)
+                : ListView(
                   children: [
                     if (_groups.isNotEmpty) ...[
                       const Padding(
@@ -446,7 +443,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: const Icon(LucideIcons.users, size: 16, color: Colors.white24),
                           ),
                           title: Text(group['name'] ?? 'Grupo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: const Text("Multi-Nivel / P2P activo", style: TextStyle(color: Colors.white24, fontSize: 11)),
+                          subtitle: const Text("Chat grupal", style: TextStyle(color: Colors.white24, fontSize: 11)),
                         );
                       }),
                     ],
@@ -458,7 +455,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       final isSelected = _selectedContact?['id'] == contact['id'];
                       final isOnline = _onlineUserIds.contains(contact['id']);
                       String name = contact['full_name'] ?? '${contact['first_name'] ?? ''} ${contact['last_name'] ?? ''}'.trim();
-                      if (name.isEmpty) name = "Nodo Desconocido";
+                      if (name.isEmpty) name = "Contacto Desconocido";
 
                       return ListTile(
                         onTap: () => _fetchMessages(contact),
@@ -503,15 +500,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _buildChatArea() {
     if (_selectedContact == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(LucideIcons.messageSquare, size: 80, color: Colors.white.withOpacity(0.02)),
-            const SizedBox(height: 16),
-            const Text("Selecciona un nodo para iniciar la transmisión", style: TextStyle(color: Colors.white24)),
-          ],
-        ),
+      return const EmptyStateWidget(
+        message: "Selecciona un contacto para iniciar el chat",
+        icon: LucideIcons.messageSquare,
       );
     }
 
@@ -522,7 +513,7 @@ class _ChatScreenState extends State<ChatScreen> {
           child: _isLoadingMessages
             ? const Center(child: CircularProgressIndicator(color: Colors.red))
             : _messages.isEmpty
-              ? const Center(child: Text("Inicio de la cadena de mensajes", style: TextStyle(color: Colors.white10)))
+              ? const Center(child: Text("No hay mensajes aún", style: TextStyle(color: Colors.white10)))
               : ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(24),
@@ -567,7 +558,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   overflow: TextOverflow.ellipsis
                 ),
                 Text(
-                  isGroup ? "Nodo de Red Industrial" : (isOnline ? "Conexión Segura / En Línea" : "Desconectado / Última conexión reciente"), 
+                  isGroup ? "Chat grupal" : (isOnline ? "En Línea" : "Desconectado"), 
                   style: TextStyle(color: isOnline ? Colors.greenAccent : Colors.white24, fontSize: 10),
                   overflow: TextOverflow.ellipsis,
                 ),

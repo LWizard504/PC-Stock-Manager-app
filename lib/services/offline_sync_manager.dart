@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/services/local_database_service.dart';
 
@@ -271,21 +272,21 @@ class OfflineSyncManager {
 
   /// Offline Caching & Authentication Methods (Using SQLite tables)
 
-  String _hashPassword(String password) {
-    final bytes = utf8.encode("stockmanager_salt_" + password);
-    return base64Encode(bytes);
+  String _hashPassword(String email, String password) {
+    final bytes = utf8.encode("stockmanager_v2_${email.toLowerCase().trim()}_$password");
+    return sha256.convert(bytes).toString();
   }
 
   Future<void> cacheUserCredentials(String email, String password, Map<String, dynamic> profile) async {
-    final hash = _hashPassword(password);
+    final hash = _hashPassword(email, password);
     await LocalDatabaseService.instance.saveUserCredentials(email, hash, profile);
   }
 
   Future<Map<String, dynamic>?> authenticateOffline(String email, String password) async {
-    final enteredHash = _hashPassword(password);
+    final enteredHash = _hashPassword(email, password);
     final profile = await LocalDatabaseService.instance.getOfflineUser(email, enteredHash);
     if (profile != null) {
-      isOffline.value = true; // Actively transition to offline state
+      isOffline.value = true;
     }
     return profile;
   }
