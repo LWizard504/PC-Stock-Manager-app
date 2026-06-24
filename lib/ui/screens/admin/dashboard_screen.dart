@@ -31,7 +31,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final double totalRevenue = (salesResponse as List).fold(0, (sum, item) => sum + (item['total_amount'] as num).toDouble());
       final int totalSalesCount = salesResponse.length;
 
-      final inventoryResponse = await _supabase.from('inventory').select('quantity').lt('quantity', 5);
+      final inventoryResponse = await _supabase.from('inventory').select('stock_level').lt('stock_level', 5);
       final int lowStockCount = (inventoryResponse as List).length;
 
       final profilesResponse = await _supabase.from('profiles').select('id').inFilter('role', ['manager', 'employee', 'it']);

@@ -39,11 +39,11 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
       final int activeSessions = (sessionsResponse as List).length;
 
       // 3. Stock Alertas
-      final inventoryResponse = await _supabase.from('inventory').select('quantity').lt('quantity', 10);
+      final inventoryResponse = await _supabase.from('inventory').select('stock_level').lt('stock_level', 10);
       final int stockAlerts = (inventoryResponse as List).length;
 
-      // 4. Top Products (Simulated based on products table for now)
-      final productsResponse = await _supabase.from('products').select('name, price').limit(5);
+      // 4. Top Products
+      final productsResponse = await _supabase.from('inventory').select('name, price').limit(5);
 
       // 5. Tenant Employees
       final currentUser = _supabase.auth.currentUser;

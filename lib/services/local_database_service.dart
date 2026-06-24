@@ -30,8 +30,9 @@ class LocalDatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -46,34 +47,26 @@ class LocalDatabaseService {
       )
     ''');
 
-    // 2. Products Table
-    await db.execute('''
-      CREATE TABLE products (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        sku TEXT,
-        price REAL,
-        category TEXT,
-        is_active INTEGER DEFAULT 1,
-        metadata_json TEXT,
-        tenant_id TEXT
-      )
-    ''');
-
-    // 3. Inventory Table
+    // 2. Unified Inventory Table (merged products + inventory)
     await db.execute('''
       CREATE TABLE inventory (
         id TEXT PRIMARY KEY,
-        product_id TEXT NOT NULL,
-        branch_id TEXT NOT NULL,
         tenant_id TEXT,
+        branch_id TEXT,
+        name TEXT NOT NULL,
+        sku TEXT,
+        category TEXT,
+        price REAL DEFAULT 0,
         stock_level INTEGER DEFAULT 0,
         min_stock INTEGER DEFAULT 0,
-        FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+        is_active INTEGER DEFAULT 1,
+        metadata_json TEXT,
+        created_at INTEGER,
+        updated_at INTEGER
       )
     ''');
 
-    // 4. Sync Queue Table
+    // 3. Sync Queue Table
     await db.execute('''
       CREATE TABLE sync_queue (
         id TEXT PRIMARY KEY,
@@ -84,6 +77,16 @@ class LocalDatabaseService {
     ''');
 
     debugPrint("SQLite database tables created successfully.");
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('DROP TABLE IF EXISTS products');
+      await db.execute('DROP TABLE IF EXISTS inventory');
+      await db.execute('DROP TABLE IF EXISTS sync_queue');
+      await db.execute('DROP TABLE IF EXISTS users');
+      await _onCreate(db, newVersion);
+    }
   }
 
   // --- USER PERSISTENCE ---
@@ -142,91 +145,53 @@ class LocalDatabaseService {
 
   // --- PRODUCTS & INVENTORY CACHING ---
 
-  Future<void> saveProductsAndInventory(List<Map<String, dynamic>> products) async {
+  Future<void> saveProductsAndInventory(List<Map<String, dynamic>> inventoryItems) async {
     final db = await database;
     
     await db.transaction((txn) async {
-      // Clear existing records to ensure cache consistency
       await txn.delete('inventory');
-      await txn.delete('products');
 
-      for (var p in products) {
-        // Save product
+      for (var item in inventoryItems) {
         await txn.insert(
-          'products',
+          'inventory',
           {
-            'id': p['id'],
-            'name': p['name'] ?? '',
-            'sku': p['sku'],
-            'price': (p['price'] as num?)?.toDouble() ?? 0.0,
-            'category': p['category'],
-            'is_active': (p['is_active'] as bool?) == false ? 0 : 1,
-            'metadata_json': jsonEncode(p['metadata'] ?? {}),
-            'tenant_id': p['tenant_id'],
+            'id': item['id'],
+            'tenant_id': item['tenant_id'],
+            'branch_id': item['branch_id'],
+            'name': item['name'] ?? '',
+            'sku': item['sku'],
+            'category': item['category'],
+            'price': (item['price'] as num?)?.toDouble() ?? 0.0,
+            'stock_level': (item['stock_level'] as num?)?.toInt() ?? 0,
+            'min_stock': (item['min_stock'] as num?)?.toInt() ?? 0,
+            'is_active': (item['is_active'] as bool?) == false ? 0 : 1,
+            'metadata_json': jsonEncode(item['metadata'] ?? {}),
           },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
-
-        // Save nested inventory records
-        final invList = p['inventory'];
-        if (invList != null && invList is List) {
-          for (var inv in invList) {
-            await txn.insert(
-              'inventory',
-              {
-                'id': inv['id'] ?? (p['id'] + '_' + (inv['branch_id'] ?? 'default')),
-                'product_id': p['id'],
-                'branch_id': inv['branch_id'] ?? '',
-                'tenant_id': inv['tenant_id'],
-                'stock_level': (inv['stock_level'] as num?)?.toInt() ?? 0,
-                'min_stock': (inv['min_stock'] as num?)?.toInt() ?? 0,
-              },
-              conflictAlgorithm: ConflictAlgorithm.replace,
-            );
-          }
-        }
       }
     });
     
-    debugPrint("SQLite: Cached ${products.length} products and inventory levels.");
+    debugPrint("SQLite: Cached ${inventoryItems.length} inventory items.");
   }
 
   Future<List<Map<String, dynamic>>> getCachedProducts() async {
     final db = await database;
-    
-    final List<Map<String, dynamic>> prodMaps = await db.query('products');
-    final List<Map<String, dynamic>> invMaps = await db.query('inventory');
+    final List<Map<String, dynamic>> maps = await db.query('inventory');
 
-    List<Map<String, dynamic>> result = [];
-
-    for (var p in prodMaps) {
-      // Get associated inventories
-      final inventories = invMaps
-          .where((inv) => inv['product_id'] == p['id'])
-          .map((inv) => {
-                'id': inv['id'],
-                'product_id': inv['product_id'],
-                'branch_id': inv['branch_id'],
-                'tenant_id': inv['tenant_id'],
-                'stock_level': inv['stock_level'],
-                'min_stock': inv['min_stock'],
-              })
-          .toList();
-
-      result.add({
-        'id': p['id'],
-        'name': p['name'],
-        'sku': p['sku'],
-        'price': p['price'],
-        'category': p['category'],
-        'is_active': p['is_active'] == 1,
-        'metadata': jsonDecode(p['metadata_json'] as String? ?? '{}'),
-        'tenant_id': p['tenant_id'],
-        'inventory': inventories,
-      });
-    }
-
-    return result;
+    return maps.map((p) => {
+      'id': p['id'],
+      'name': p['name'],
+      'sku': p['sku'],
+      'price': p['price'],
+      'category': p['category'],
+      'is_active': p['is_active'] == 1,
+      'metadata': jsonDecode(p['metadata_json'] as String? ?? '{}'),
+      'tenant_id': p['tenant_id'],
+      'branch_id': p['branch_id'],
+      'stock_level': p['stock_level'],
+      'min_stock': p['min_stock'],
+    }).toList();
   }
 
   // --- OFFLINE SYNC QUEUE ---
@@ -267,7 +232,6 @@ class LocalDatabaseService {
     await db.transaction((txn) async {
       await txn.delete('sync_queue');
       await txn.delete('inventory');
-      await txn.delete('products');
       await txn.delete('users');
     });
   }

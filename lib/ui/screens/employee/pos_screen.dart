@@ -82,7 +82,6 @@ class _POSScreenState extends State<POSScreen> {
     final tenantId = _myProfile?['tenant_id'];
     _channel = supabase.channel('employee-pos-products');
     _channel!
-      .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'products', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'tenant_id', value: tenantId), callback: (payload) => _fetchProducts())
       .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'inventory', filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'tenant_id', value: tenantId), callback: (payload) => _fetchProducts())
       .subscribe();
   }
@@ -104,13 +103,13 @@ class _POSScreenState extends State<POSScreen> {
           currentBranchId = fallbackBranch?['id'] as String?;
         }
 
-        var query = supabase.from('products').select('*, inventory(*)').eq('is_active', true);
+        var query = supabase.from('inventory').select('*').eq('is_active', true);
         if (tenantId != null) query = query.eq('tenant_id', tenantId);
+        if (currentBranchId != null) query = query.eq('branch_id', currentBranchId);
 
         final response = await query;
         products = List<Map<String, dynamic>>.from(response);
 
-        // Cache the list of products for offline usage
         await OfflineSyncManager.instance.cacheProducts(products);
       } catch (e) {
         debugPrint("Failed to fetch products online, loading offline cache: $e");
@@ -125,50 +124,11 @@ class _POSScreenState extends State<POSScreen> {
       if (mounted) {
         final cats = {'All'};
 
-        // If currentBranchId is still null, look through products' inventory list to dynamically fallback to the branch with stock!
-        if (currentBranchId == null) {
-          for (var p in products) {
-            if (p['inventory'] != null && p['inventory'] is List && (p['inventory'] as List).isNotEmpty) {
-              for (var inv in p['inventory']) {
-                if ((inv['stock_level'] as num?)?.toInt() != 0) {
-                  currentBranchId = inv['branch_id'] as String?;
-                  break;
-                }
-              }
-              if (currentBranchId != null) break;
-            }
-          }
-          // If still null, just take the first branch_id found
-          if (currentBranchId == null) {
-            for (var p in products) {
-              if (p['inventory'] != null && p['inventory'] is List && (p['inventory'] as List).isNotEmpty) {
-                currentBranchId = p['inventory'][0]['branch_id'] as String?;
-                if (currentBranchId != null) break;
-              }
-            }
-          }
-        }
-        
         for (var p in products) {
           final meta = p['metadata'] as Map<String, dynamic>? ?? {};
           p['image_url'] = meta['image_url'];
           if (meta.containsKey('category')) cats.add(meta['category']);
-          
-          int stock = 0;
-          if (p['inventory'] != null && p['inventory'] is List) {
-            for (var inv in p['inventory']) {
-              if (inv['branch_id'] == currentBranchId) {
-                stock = (inv['stock_level'] as num?)?.toInt() ?? 0;
-                break;
-              }
-            }
-            if (stock == 0) {
-              for (var inv in p['inventory']) {
-                stock += (inv['stock_level'] as num?)?.toInt() ?? 0;
-              }
-            }
-          }
-          p['stock'] = stock;
+          p['stock'] = (p['stock_level'] as num?)?.toInt() ?? 0;
         }
 
         setState(() {

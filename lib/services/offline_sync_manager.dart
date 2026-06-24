@@ -166,56 +166,39 @@ class OfflineSyncManager {
         try {
           switch (op.type) {
             case 'insert_product':
-              final prodData = Map<String, dynamic>.from(op.payload['product_data']);
-              final quantity = op.payload['quantity'] as int? ?? 0;
               final branchId = op.payload['branch_id'] as String?;
               final tenantId = op.payload['tenant_id'] as String?;
 
-              final response = await supabase.from('products').insert(prodData).select().single();
-              if (branchId != null && tenantId != null) {
-                await supabase.from('inventory').insert({
-                  'tenant_id': tenantId,
-                  'product_id': response['id'],
-                  'branch_id': branchId,
-                  'stock_level': quantity,
-                });
-              }
+              await supabase.from('inventory').insert({
+                'tenant_id': tenantId,
+                'branch_id': branchId,
+                'name': op.payload['name'],
+                'sku': op.payload['sku'],
+                'price': op.payload['price'],
+                'category': op.payload['category'],
+                'stock_level': op.payload['quantity'] as int? ?? 0,
+                'metadata': op.payload['metadata'] ?? {},
+              });
               opSuccess = true;
               break;
 
             case 'update_product':
               final id = op.payload['id'] as String;
-              final prodData = Map<String, dynamic>.from(op.payload['product_data']);
-              final quantity = op.payload['quantity'] as int?;
-              final branchId = op.payload['branch_id'] as String?;
-              final tenantId = op.payload['tenant_id'] as String?;
 
-              await supabase.from('products').update(prodData).eq('id', id);
-
-              if (quantity != null && branchId != null) {
-                final existingInv = await supabase.from('inventory')
-                    .select('id')
-                    .eq('product_id', id)
-                    .eq('branch_id', branchId)
-                    .maybeSingle();
-
-                if (existingInv != null) {
-                  await supabase.from('inventory').update({'stock_level': quantity}).eq('id', existingInv['id']);
-                } else {
-                  await supabase.from('inventory').insert({
-                    'tenant_id': tenantId,
-                    'product_id': id,
-                    'branch_id': branchId,
-                    'stock_level': quantity,
-                  });
-                }
-              }
+              await supabase.from('inventory').update({
+                'name': op.payload['name'],
+                'sku': op.payload['sku'],
+                'price': op.payload['price'],
+                'category': op.payload['category'],
+                'stock_level': op.payload['quantity'] as int? ?? 0,
+                'metadata': op.payload['metadata'] ?? {},
+              }).eq('id', id);
               opSuccess = true;
               break;
 
             case 'delete_product':
               final id = op.payload['id'] as String;
-              await supabase.from('products').delete().eq('id', id);
+              await supabase.from('inventory').delete().eq('id', id);
               opSuccess = true;
               break;
 

@@ -76,7 +76,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final branchesRes = await supabase.from('branches').select('*').eq('tenant_id', tenantId).order('created_at', ascending: true);
       _branches = List<Map<String, dynamic>>.from(branchesRes);
 
-      var query = supabase.from('products').select('*, inventory(*)');
+      var query = supabase.from('inventory').select('*, branches(name)');
 
       if (role == 'superadmin' || role == 'global_it') {
         if (mounted) setState(() => _title = "Stock Global de Red");
@@ -129,10 +129,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final expirationController = TextEditingController(text: meta['expiration_date'] ?? '');
     final imageUrlController = TextEditingController(text: meta['image_url'] ?? '');
     
-    int initialStock = 0;
-    if (isEdit && product['inventory'] != null && (product['inventory'] as List).isNotEmpty) {
-      initialStock = (product['inventory'][0]['stock_level'] as num?)?.toInt() ?? 0;
-    }
+    int initialStock = isEdit ? (product['stock_level'] as num?)?.toInt() ?? 0 : 0;
     final quantityController = TextEditingController(text: initialStock.toString());
 
     showDialog(
@@ -273,7 +270,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final tenantId = _myProfile?['tenant_id'];
     final branchId = _branches.isNotEmpty ? _branches[0]['id'] : null;
 
-    final productData = {
+    final type = id == null ? 'insert_product' : 'update_product';
+    final payload = {
+      'id': id,
       'name': name,
       'sku': sku,
       'price': price,
@@ -282,13 +281,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         'location': location,
         'expiration_date': expirationDate,
         'image_url': imageUrl
-      }
-    };
-
-    final type = id == null ? 'insert_product' : 'update_product';
-    final payload = {
-      'id': id,
-      'product_data': productData,
+      },
       'quantity': quantity,
       'branch_id': branchId,
       'tenant_id': tenantId,
@@ -300,36 +293,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
         payload: payload,
         onlineAction: (supabase) async {
           if (id == null) {
-            productData['tenant_id'] = tenantId;
-            final productResponse = await supabase.from('products').insert(productData).select().single();
-            if (branchId != null) {
-              await supabase.from('inventory').insert({
-                'tenant_id': tenantId,
-                'product_id': productResponse['id'],
-                'branch_id': branchId,
-                'stock_level': quantity,
-              });
-            }
+            await supabase.from('inventory').insert({
+              'tenant_id': tenantId,
+              'branch_id': branchId,
+              'name': name,
+              'sku': sku,
+              'price': price,
+              'category': category,
+              'stock_level': quantity,
+              'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
+            });
           } else {
-            await supabase.from('products').update(productData).eq('id', id);
-            if (branchId != null) {
-              final existingInv = await supabase.from('inventory')
-                  .select('id')
-                  .eq('product_id', id)
-                  .eq('branch_id', branchId)
-                  .maybeSingle();
-
-              if (existingInv != null) {
-                await supabase.from('inventory').update({'stock_level': quantity}).eq('id', existingInv['id']);
-              } else {
-                await supabase.from('inventory').insert({
-                  'tenant_id': tenantId,
-                  'product_id': id,
-                  'branch_id': branchId,
-                  'stock_level': quantity,
-                });
-              }
-            }
+            await supabase.from('inventory').update({
+              'name': name,
+              'sku': sku,
+              'price': price,
+              'category': category,
+              'stock_level': quantity,
+              'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
+            }).eq('id', id);
           }
         },
       );
@@ -343,11 +325,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
             'sku': sku,
             'price': price,
             'category': category,
-            'metadata': {'location': location, 'expiration_date': expirationDate},
+            'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
             'is_active': true,
-            'inventory': [
-              {'stock_level': quantity, 'branch_id': branchId}
-            ]
+            'stock_level': quantity,
+            'branch_id': branchId,
+            'tenant_id': tenantId,
           };
           setState(() {
             _inventoryItems.insert(0, mockProduct);
@@ -361,10 +343,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
               _inventoryItems[idx]['sku'] = sku;
               _inventoryItems[idx]['price'] = price;
               _inventoryItems[idx]['category'] = category;
-              _inventoryItems[idx]['metadata'] = {'location': location, 'expiration_date': expirationDate};
-              _inventoryItems[idx]['inventory'] = [
-                {'stock_level': quantity, 'branch_id': branchId}
-              ];
+              _inventoryItems[idx]['metadata'] = {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl};
+              _inventoryItems[idx]['stock_level'] = quantity;
+              _inventoryItems[idx]['branch_id'] = branchId;
               _filteredItems = List.from(_inventoryItems);
             }
           });
@@ -411,7 +392,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         type: 'delete_product',
         payload: {'id': id},
         onlineAction: (supabase) async {
-          await supabase.from('products').delete().eq('id', id);
+          await supabase.from('inventory').delete().eq('id', id);
         },
       );
 
@@ -438,7 +419,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     ToastUtils.showPromiseToast(
       context, 
       message: currentStatus ? "Desactivando..." : "Activando...", 
-      promise: Supabase.instance.client.from('products').update({'is_active': !currentStatus}).eq('id', product['id']).then((_) => _fetchInventory()), 
+      promise: Supabase.instance.client.from('inventory').update({'is_active': !currentStatus}).eq('id', product['id']).then((_) => _fetchInventory()), 
       successMessage: "Estado actualizado", 
       errorMessage: "Error al actualizar estado"
     );
@@ -541,12 +522,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           final double priceNum = (item['price'] as num?)?.toDouble() ?? 0.0;
           final bool isActive = item['is_active'] ?? true;
           
-          int stock = 0;
-          if (item['inventory'] != null && item['inventory'] is List) {
-            for (var inv in item['inventory']) {
-              stock += (inv['stock_level'] as num?)?.toInt() ?? 0;
-            }
-          }
+          int stock = (item['stock_level'] as num?)?.toInt() ?? 0;
 
           return DataRow(
             color: WidgetStateProperty.resolveWith<Color?>((states) => isActive ? null : Colors.red.withOpacity(0.05)),
