@@ -65,7 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     // 2. Signaling API (Socket.io) Initialization
-    _signaling.init();
+    Future.microtask(() => _signaling.init());
     
     _signaling.onNewMessage = (data) {
       debugPrint("ChatScreen: Raw message received from Signaling: $data");

@@ -20,7 +20,7 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    SignalingService().init();
+    Future.microtask(() => SignalingService().init());
     _managerDataFuture = _fetchManagerData();
   }
 

@@ -152,7 +152,7 @@ class _MainLayoutState extends State<MainLayout> {
         _enforceWindowRules(UserRole.admin);
       }
     }
-    SignalingService().init();
+    await SignalingService().init();
     SignalingService().onIncomingCall = (payload) {
       if (_currentUser?.role != UserRole.superadmin) {
         debugPrint("Blocking incoming call: current user is not superadmin.");

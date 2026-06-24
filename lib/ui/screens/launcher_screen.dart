@@ -60,7 +60,7 @@ class _LauncherScreenState extends State<LauncherScreen> with TickerProviderStat
         if (l > c) return true;
         if (l < c) return false;
       }
-    } catch (_) {}
+    } catch (_) { debugPrint("_isVersionSuperior: error comparing versions"); }
     return false;
   }
 

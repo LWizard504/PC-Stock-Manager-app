@@ -825,7 +825,7 @@ class _CallScreenState extends State<CallScreen> with TickerProviderStateMixin {
               }
             }
           }
-        } catch (e) {}
+        } catch (e) { debugPrint("_startStatsTimer error: $e"); }
       }
     });
   }

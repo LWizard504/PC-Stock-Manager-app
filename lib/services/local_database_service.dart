@@ -138,7 +138,7 @@ class LocalDatabaseService {
     if (maps.isNotEmpty) {
       try {
         return jsonDecode(maps.first['profile_json'] as String) as Map<String, dynamic>;
-      } catch (_) {}
+      } catch (_) { debugPrint("getLastLoggedInProfile: error decoding profile_json"); }
     }
     return null;
   }

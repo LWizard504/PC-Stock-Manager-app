@@ -86,7 +86,7 @@ class _UsersScreenState extends State<UsersScreen> {
     final emailController = TextEditingController();
     final firstNameController = TextEditingController();
     final lastNameController = TextEditingController();
-    final passwordController = TextEditingController(text: "StakiaNode2026!");
+    final passwordController = TextEditingController();
     String selectedRole = "employee";
 
     showDialog(
