@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/mfa_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -114,8 +115,22 @@ class _LoginScreenState extends State<LoginScreen> {
         } catch (e) {
           debugPrint("Failed to fetch/cache profile during login: $e");
         }
-        
-        if (mounted) {
+
+        bool mfaVerified = true;
+        try {
+          final factorsRes = await Supabase.instance.client.auth.mfa.listFactors();
+          if (factorsRes.totp.isNotEmpty && mounted) {
+            mfaVerified = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => const MfaVerifyDialog(),
+            ) ?? false;
+          }
+        } catch (e) {
+          debugPrint("MFA check error: $e");
+        }
+
+        if (mfaVerified && mounted) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const MainLayout()),
           );

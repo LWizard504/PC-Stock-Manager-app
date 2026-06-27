@@ -8,6 +8,7 @@ import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/skeleton_loader.dart';
 import 'package:pc_dev_flutter/ui/widgets/error_state_widget.dart';
+import 'package:pc_dev_flutter/services/inventory_predictor.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -21,6 +22,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   List<Map<String, dynamic>> _inventoryItems = [];
   List<Map<String, dynamic>> _filteredItems = [];
   List<Map<String, dynamic>> _branches = [];
+  Map<String, dynamic>? _selectedBranch;
   String _title = "Cargando...";
   Map<String, dynamic>? _myProfile;
   final TextEditingController _searchController = TextEditingController();
@@ -104,15 +106,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
   void _filterInventory() {
     final query = _searchController.text.toLowerCase();
     setState(() {
-      if (query.isEmpty) {
-        _filteredItems = List.from(_inventoryItems);
-      } else {
-        _filteredItems = _inventoryItems.where((item) {
+      _filteredItems = _inventoryItems.where((item) {
+        if (query.isNotEmpty) {
           final name = (item['name'] ?? '').toString().toLowerCase();
           final sku = (item['sku'] ?? '').toString().toLowerCase();
-          return name.contains(query) || sku.contains(query);
-        }).toList();
-      }
+          if (!name.contains(query) && !sku.contains(query)) return false;
+        }
+        if (_selectedBranch != null && item['branch_id'] != _selectedBranch!['id']) {
+          return false;
+        }
+        return true;
+      }).toList();
     });
   }
 
@@ -447,6 +451,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 ),
                 Row(
                   children: [
+                    if (_branches.length > 1)
+                      _buildBranchSelector(),
+                    if (_branches.length > 1) const SizedBox(width: 12),
                     ElevatedButton.icon(
                       onPressed: () => _loadData(),
                       icon: const Icon(LucideIcons.refreshCw, size: 16),
@@ -501,6 +508,51 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  Widget _buildBranchSelector() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceLight,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedBranch?['id'] ?? 'all',
+          dropdownColor: const Color(0xFF1E293B),
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          icon: const Icon(LucideIcons.chevronDown, color: Colors.white54, size: 16),
+          items: [
+            const DropdownMenuItem(value: 'all', child: Text("Todas las sucursales")),
+            ..._branches.map((b) => DropdownMenuItem(
+              value: b['id'],
+              child: Row(
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(b['name'] ?? 'Sucursal'),
+                ],
+              ),
+            )),
+          ],
+          onChanged: (val) {
+            setState(() {
+              if (val == 'all') {
+                _selectedBranch = null;
+              } else {
+                _selectedBranch = _branches.firstWhere((b) => b['id'] == val);
+              }
+            });
+            _filterInventory();
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildInventoryTable(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -513,6 +565,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           DataColumn(label: Text("Categoría")),
           DataColumn(label: Text("Precio")),
           DataColumn(label: Text("Stock")),
+          DataColumn(label: Text("Pronóstico")),
           DataColumn(label: Text("Acciones")),
         ],
         rows: _filteredItems.map((item) {
@@ -523,6 +576,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
           final bool isActive = item['is_active'] ?? true;
           
           int stock = (item['stock_level'] as num?)?.toInt() ?? 0;
+
+          final prediction = InventoryPredictor.predictRestockDate(
+            currentStock: stock,
+            salesHistory: [],
+            threshold: 5,
+          );
 
           return DataRow(
             color: WidgetStateProperty.resolveWith<Color?>((states) => isActive ? null : Colors.red.withOpacity(0.05)),
@@ -570,6 +629,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               DataCell(Text(category, style: const TextStyle(color: Colors.white54))),
               DataCell(Text("\$${priceNum.toStringAsFixed(2)}")),
               DataCell(Text(stock.toString(), style: TextStyle(color: stock < 5 ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold))),
+              DataCell(_buildPredictionBadge(stock, prediction.status, prediction.daysRemaining)),
               DataCell(Row(
                 children: [
                   IconButton(
@@ -595,4 +655,43 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
   }
+
+  Widget _buildPredictionBadge(int stock, String status, int? daysRemaining) {
+    Color bgColor;
+    Color textColor;
+    String label;
+
+    if (stock < 3) {
+      bgColor = Colors.red.withOpacity(0.15);
+      textColor = Colors.redAccent;
+      label = 'CRÍTICO';
+    } else if (daysRemaining != null && daysRemaining <= 2) {
+      bgColor = Colors.red.withOpacity(0.15);
+      textColor = Colors.redAccent;
+      label = '$daysRemaining día(s)';
+    } else if (daysRemaining != null && daysRemaining <= 7) {
+      bgColor = Colors.orange.withOpacity(0.15);
+      textColor = Colors.orange;
+      label = '$daysRemaining día(s)';
+    } else if (stock < 10) {
+      bgColor = Colors.amber.withOpacity(0.15);
+      textColor = Colors.amber;
+      label = 'Stock bajo';
+    } else {
+      bgColor = Colors.green.withOpacity(0.1);
+      textColor = Colors.greenAccent;
+      label = 'Saludable';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(label,
+        style: TextStyle(color: textColor, fontSize: 10, fontWeight: FontWeight.w900)),
+    );
+  }
+
 }

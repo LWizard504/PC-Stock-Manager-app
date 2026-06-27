@@ -5,9 +5,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/mfa_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/help_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -21,6 +25,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? _profile;
   bool _isLoading = true;
   bool _showTouchNumpad = true;
+  bool _mfaEnabled = false;
+  bool _mfaLoading = true;
 
   @override
   void initState() {
@@ -60,8 +66,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _isLoading = false;
         });
       }
+      _loadMfaStatus();
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadMfaStatus() async {
+    try {
+      final factorsRes = await _supabase.auth.mfa.listFactors();
+      final hasTotp = factorsRes.totp.isNotEmpty;
+      final profileMfa = _profile?['mfa_enabled'] == true;
+      if (mounted) {
+        setState(() {
+          _mfaEnabled = hasTotp && profileMfa;
+          _mfaLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _mfaLoading = false);
     }
   }
 
@@ -126,6 +149,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _fetchProfile();
   }
 
+  Future<void> _handleMfaDisable() async {
+    try {
+      final factorsRes = await _supabase.auth.mfa.listFactors();
+      for (final factor in factorsRes.totp) {
+        await _supabase.auth.mfa.unenroll(factor.id);
+      }
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        await _supabase.from('profiles').update({'mfa_enabled': false}).eq('id', user.id);
+      }
+      if (mounted) {
+        setState(() => _mfaEnabled = false);
+        ToastUtils.showSuccessToast(context, message: "2FA desactivado");
+      }
+    } catch (e) {
+      if (mounted) ToastUtils.showErrorToast(context, message: "Error al desactivar 2FA");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Center(child: CircularProgressIndicator(color: Colors.red));
@@ -158,12 +200,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   );
                 }
               }),
-              _buildTile(LucideIcons.shieldCheck, "Doble Factor", "Seguridad biométrica o código", () {}),
+              _buildMfaTile(),
             ]),
             
             _buildSection("Preferencias", [
-              _buildTile(LucideIcons.moon, "Tema Visual", "Alternar entre modo industrial y luz", () {}),
-              _buildTile(LucideIcons.languages, "Idioma", "Español (Latinoamérica)", () {}),
+              _buildTile(LucideIcons.moon, "Tema Visual", "Alternar entre modo industrial y luz", () {
+                ToastUtils.showCustomToast(context, "Funcionalidad próximamente", isError: false);
+              }),
+              _buildTile(LucideIcons.languages, "Idioma", _getCurrentLanguage(), () {
+                final localeProvider = context.read<LocaleProvider>();
+                final current = localeProvider.locale.languageCode;
+                localeProvider.setLocale(Locale(current == 'en' ? 'es' : 'en'));
+                setState(() {});
+              }),
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                 leading: const Icon(LucideIcons.keyboard, color: Colors.white60, size: 20),
@@ -179,12 +228,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             
-             _buildSection("Sistema y Actualizaciones", [
+            _buildSection("Sistema y Actualizaciones", [
               _buildTile(LucideIcons.download, "Buscar Actualizaciones", "Verificar optimizaciones y reiniciar launcher", () {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (context) => const LauncherScreen()),
                   (route) => false,
                 );
+              }),
+            ]),
+
+            _buildSection("Ayuda y Soporte", [
+              _buildTile(LucideIcons.helpCircle, "Centro de Ayuda", "Guías y documentación del sistema", () {
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => HelpScreen(role: _profile?['role'] ?? 'admin'),
+                ));
               }),
             ]),
 
@@ -194,6 +251,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  String _getCurrentLanguage() {
+    final locale = context.read<LocaleProvider>().locale;
+    return locale.languageCode == 'en' ? 'English' : 'Español (Latinoamérica)';
+  }
+
+  Widget _buildMfaTile() {
+    if (_mfaLoading) {
+      return const ListTile(
+        contentPadding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+        leading: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+        title: Text("Verificando 2FA...", style: TextStyle(color: Colors.white38, fontWeight: FontWeight.bold, fontSize: 14)),
+      );
+    }
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      leading: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: _mfaEnabled ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: (_mfaEnabled ? Colors.green : Colors.red).withOpacity(0.2)),
+        ),
+        child: Icon(
+          _mfaEnabled ? LucideIcons.shield : LucideIcons.shieldOff,
+          color: _mfaEnabled ? Colors.green : Colors.redAccent,
+          size: 18,
+        ),
+      ),
+      title: Row(
+        children: [
+          const Text("Autenticación 2FA", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: _mfaEnabled ? Colors.green.withOpacity(0.15) : Colors.red.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              _mfaEnabled ? "ACTIVO" : "INACTIVO",
+              style: TextStyle(
+                color: _mfaEnabled ? Colors.green : Colors.redAccent,
+                fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+            ),
+          ),
+        ],
+      ),
+      subtitle: Text(
+        _mfaEnabled ? "Autenticación de dos factores activa" : "Su cuenta está vulnerable",
+        style: const TextStyle(color: Colors.white24, fontSize: 12)),
+      trailing: _mfaEnabled
+        ? TextButton(
+            onPressed: _handleMfaDisable,
+            child: const Text("Desactivar", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+          )
+        : null,
+      onTap: _mfaEnabled ? null : () async {
+        final result = await showDialog<bool>(
+          context: context,
+          barrierColor: Colors.black54,
+          builder: (_) => const MfaSetupScreen(),
+        );
+        if (result == true && mounted) {
+          setState(() => _mfaEnabled = true);
+          _loadMfaStatus();
+        }
+      },
     );
   }
 
