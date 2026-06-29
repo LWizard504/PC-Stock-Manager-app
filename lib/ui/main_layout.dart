@@ -319,8 +319,6 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: "Node Status", icon: LucideIcons.activity, screen: const NodeStatusScreen()),
           SidebarItem(title: "Downloads", icon: LucideIcons.downloadCloud, screen: const DownloadsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
-          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
           SidebarItem(title: "Settings", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.admin:
