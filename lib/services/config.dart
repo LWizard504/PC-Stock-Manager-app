@@ -1,7 +1,7 @@
 class AppConfig {
   static const String signalingUrl = 'https://api-stockm-call-service.onrender.com';
   static const String webAdminUrl = 'https://stockmanager-wine.vercel.app';
-  static const String appVersion = '35.0.5';
+  static const String appVersion = '35.0.6';
   
   static const String supabaseUrl = 'https://fctewfmsofdcqrwlxoyo.supabase.co';
   static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdGV3Zm1zb2ZkY3Fyd2x4b3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3NDYzNDUsImV4cCI6MjA5MjMyMjM0NX0.efBvCsV_hfUYWskDoVmc5PPEB97RoCsDkgctj7X8g4g';

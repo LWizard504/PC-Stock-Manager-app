@@ -44,10 +44,17 @@ class _PricingScreenState extends State<PricingScreen> {
   bool _editActive = true;
   int? _editingPlanId;
 
+  bool _buildError = false;
+  String _buildErrorMessage = '';
+
   @override
   void initState() {
     super.initState();
-    _fetchPlans();
+    try {
+      _fetchPlans();
+    } catch (e) {
+      debugPrint("PricingScreen initState error: $e");
+    }
   }
 
   @override
@@ -445,35 +452,82 @@ class _PricingScreenState extends State<PricingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Provider.of<LocaleProvider>(context).t;
-    final filteredPlans =
-        _plans.where((p) => p['billing_interval'] == _activeCategory).toList();
-    final activeCount = _plans.where((p) => p['is_active'] == true).length;
-
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(t),
-            const SizedBox(height: 32),
-            _buildToolbar(),
-            const SizedBox(height: 32),
-            if (_isLoading)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(100),
-                  child: CircularProgressIndicator(color: Colors.red),
+    if (_buildError) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(LucideIcons.alertTriangle, color: Colors.red, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  "Pricing Engine Error",
+                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900),
                 ),
-              )
-            else
-              _buildContent(filteredPlans, activeCount),
-          ],
+                const SizedBox(height: 8),
+                Text(
+                  _buildErrorMessage,
+                  style: const TextStyle(color: Colors.white60, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () { _buildError = false; _buildErrorMessage = ''; _fetchPlans(); },
+                  icon: const Icon(LucideIcons.refreshCw, size: 16),
+                  label: const Text("Retry"),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-    );
+      );
+    }
+
+    try {
+      final t = Provider.of<LocaleProvider>(context).t;
+      final filteredPlans =
+          _plans.where((p) => p['billing_interval'] == _activeCategory).toList();
+      final activeCount = _plans.where((p) => p['is_active'] == true).length;
+
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(t),
+              const SizedBox(height: 32),
+              _buildToolbar(),
+              const SizedBox(height: 32),
+              if (_isLoading)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(100),
+                    child: CircularProgressIndicator(color: Colors.red),
+                  ),
+                )
+              else
+                _buildContent(filteredPlans, activeCount),
+            ],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint("PricingScreen build error: $e");
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _buildError = true;
+            _buildErrorMessage = e.toString();
+          });
+        }
+      });
+      return const SizedBox.shrink();
+    }
   }
 
   Widget _buildHeader(t) {
