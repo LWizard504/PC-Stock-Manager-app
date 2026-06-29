@@ -838,7 +838,7 @@ class _PricingScreenState extends State<PricingScreen> {
   Widget _buildPlanCard(Map<String, dynamic> plan) {
     final isHighlighted = plan['is_highlighted'] == true;
     final isActive = plan['is_active'] == true;
-    final features = plan['features'] as List? ?? [];
+    final features = plan['features'] is List ? plan['features'] as List : (plan['features']?.toString().split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList() ?? []);
     final price = plan['price']?.toString() ?? '0';
     final discount = plan['discount_percentage'] as int? ?? 0;
     final hasDiscount = discount > 0;
