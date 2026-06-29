@@ -5,10 +5,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pc_dev_flutter/theme/app_theme.dart';
 import 'package:pc_dev_flutter/ui/widgets/toast_utils.dart';
-import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
-import 'package:pc_dev_flutter/ui/widgets/skeleton_loader.dart';
-import 'package:pc_dev_flutter/ui/widgets/error_state_widget.dart';
-import 'package:pc_dev_flutter/services/inventory_predictor.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -18,414 +14,514 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> {
+  final _supabase = Supabase.instance.client;
   bool _isLoading = true;
-  List<Map<String, dynamic>> _inventoryItems = [];
+  List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> _filteredItems = [];
   List<Map<String, dynamic>> _branches = [];
-  Map<String, dynamic>? _selectedBranch;
-  String _title = "Cargando...";
-  Map<String, dynamic>? _myProfile;
+  final Set<String> _selectedIds = {};
+  String _searchQuery = '';
+  String? _categoryFilter;
+  RealtimeChannel? _realtimeSubscription;
+
   final TextEditingController _searchController = TextEditingController();
-  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _searchController.addListener(_onSearchChanged);
-  }
-
-  void _onSearchChanged() {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 300), _filterInventory);
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+      _applyFilters();
+    });
   }
 
   @override
   void dispose() {
-    _debounceTimer?.cancel();
+    _realtimeSubscription?.unsubscribe();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _loadData() {
-    ToastUtils.showPromiseToast(
-      context, 
-      message: "Consultando inventario...", 
-      promise: _fetchInventory(), 
-      successMessage: "Inventario actualizado", 
-      errorMessage: "Error al sincronizar inventario"
-    );
+  List<String> get _categories {
+    final cats = _items.map((e) => e['category'] as String?).where((c) => c != null && c!.isNotEmpty).map((c) => c!);
+    return cats.toSet().toList()..sort();
   }
 
-  Future<void> _fetchInventory() async {
+  Future<void> _loadData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      if (user == null) throw Exception("No autenticado");
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('No session');
 
-      _myProfile = await supabase
+      final profile = await _supabase
           .from('profiles')
-          .select('role, tenant_id')
+          .select('tenant_id')
           .eq('id', user.id)
           .single();
+      final tenantId = profile['tenant_id'];
+      if (tenantId == null) throw Exception('No tenant');
 
-      final role = _myProfile!['role'] as String;
-      final tenantId = _myProfile!['tenant_id'];
-
-      // Fetch branches deterministically
-      final branchesRes = await supabase.from('branches').select('*').eq('tenant_id', tenantId).order('created_at', ascending: true);
-      _branches = List<Map<String, dynamic>>.from(branchesRes);
-
-      var query = supabase.from('inventory').select('*, branches(name)');
-
-      if (role == 'superadmin' || role == 'global_it') {
-        if (mounted) setState(() => _title = "Stock Global de Red");
-      } else {
-        if (mounted) setState(() => _title = "Inventario de Sucursal");
-        query = query.eq('tenant_id', tenantId);
-      }
-
-      final response = await query.order('name', ascending: true);
+      final itemsRes = await _supabase
+          .from('inventory')
+          .select('*, branches(name)')
+          .eq('tenant_id', tenantId)
+          .order('name');
+      final branchRes = await _supabase
+          .from('branches')
+          .select('id, name')
+          .eq('tenant_id', tenantId)
+          .order('created_at');
 
       if (mounted) {
         setState(() {
-          _inventoryItems = List<Map<String, dynamic>>.from(response as List);
-          _filteredItems = List.from(_inventoryItems);
+          _items = List<Map<String, dynamic>>.from(itemsRes);
+          _branches = List<Map<String, dynamic>>.from(branchRes);
           _isLoading = false;
         });
-        _filterInventory();
+        _applyFilters();
       }
+
+      await _setupRealtime(tenantId);
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
-      rethrow;
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ToastUtils.showErrorToast(context, message: 'Error cargando inventario');
+      }
     }
   }
 
-  void _filterInventory() {
-    final query = _searchController.text.toLowerCase();
+  Future<void> _setupRealtime(String tenantId) async {
+    await _realtimeSubscription?.unsubscribe();
+    _realtimeSubscription = _supabase
+        .channel('inventory-changes')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'inventory',
+          callback: (_) => _loadData(),
+        )
+        .subscribe();
+  }
+
+  void _applyFilters() {
     setState(() {
-      _filteredItems = _inventoryItems.where((item) {
-        if (query.isNotEmpty) {
+      _filteredItems = _items.where((item) {
+        if (_searchQuery.isNotEmpty) {
           final name = (item['name'] ?? '').toString().toLowerCase();
           final sku = (item['sku'] ?? '').toString().toLowerCase();
-          if (!name.contains(query) && !sku.contains(query)) return false;
+          if (!name.contains(_searchQuery) && !sku.contains(_searchQuery)) return false;
         }
-        if (_selectedBranch != null && item['branch_id'] != _selectedBranch!['id']) {
-          return false;
-        }
+        if (_categoryFilter != null && item['category'] != _categoryFilter) return false;
         return true;
       }).toList();
     });
   }
 
+  void _toggleSelect(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIds.length == _filteredItems.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds.addAll(_filteredItems.map((e) => e['id'] as String));
+      }
+    });
+  }
+
+  Future<void> _saveProduct({
+    String? id,
+    required String name,
+    required String sku,
+    required String category,
+    required double price,
+    required int stockLevel,
+    required int minStock,
+    String location = '',
+    String imageUrl = '',
+    String? branchId,
+  }) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('No session');
+      final profile = await _supabase
+          .from('profiles')
+          .select('tenant_id')
+          .eq('id', user.id)
+          .single();
+      final tenantId = profile['tenant_id'];
+      if (tenantId == null) throw Exception('No tenant');
+
+      final metadata = <String, dynamic>{};
+      if (location.isNotEmpty) metadata['location'] = location;
+      if (imageUrl.isNotEmpty) metadata['image_url'] = imageUrl;
+
+      if (id == null) {
+        await _supabase.from('inventory').insert({
+          'tenant_id': tenantId,
+          'branch_id': branchId ?? null,
+          'name': name,
+          'sku': sku,
+          'category': category,
+          'price': price,
+          'stock_level': stockLevel,
+          'min_stock': minStock,
+          'is_active': true,
+          'metadata': metadata,
+        });
+      } else {
+        await _supabase.from('inventory').update({
+          'branch_id': branchId ?? null,
+          'name': name,
+          'sku': sku,
+          'category': category,
+          'price': price,
+          'stock_level': stockLevel,
+          'min_stock': minStock,
+          'metadata': metadata,
+        }).eq('id', id);
+      }
+
+      await _loadData();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   void _showProductForm({Map<String, dynamic>? product}) {
-    final bool isEdit = product != null;
-    
-    final nameController = TextEditingController(text: isEdit ? product['name'] : '');
-    final skuController = TextEditingController(text: isEdit ? product['sku'] : '');
-    final priceController = TextEditingController(text: isEdit ? product['price'].toString() : '');
-    final categoryController = TextEditingController(text: isEdit ? product['category'] : 'General');
-    
-    final meta = isEdit ? (product['metadata'] as Map<String, dynamic>? ?? {}) : {};
-    final locationController = TextEditingController(text: meta['location'] ?? '');
-    final expirationController = TextEditingController(text: meta['expiration_date'] ?? '');
-    final imageUrlController = TextEditingController(text: meta['image_url'] ?? '');
-    
-    int initialStock = isEdit ? (product['stock_level'] as num?)?.toInt() ?? 0 : 0;
-    final quantityController = TextEditingController(text: initialStock.toString());
+    final isEdit = product != null;
+    final nameCtl = TextEditingController(text: isEdit ? product['name'] as String : '');
+    final skuCtl = TextEditingController(text: isEdit ? product['sku'] as String : '');
+    final priceCtl = TextEditingController(text: isEdit ? product['price'].toString() : '');
+    final categoryCtl = TextEditingController(text: isEdit ? product['category'] as String : '');
+    final meta = isEdit ? (product['metadata'] as Map<String, dynamic>? ?? {}) : <String, dynamic>{};
+    final locationCtl = TextEditingController(text: meta['location'] as String? ?? '');
+    final imageUrlCtl = TextEditingController(text: meta['image_url'] as String? ?? '');
+    final stockCtl = TextEditingController(text: isEdit ? '${product['stock_level'] ?? 0}' : '');
+    final minStockCtl = TextEditingController(text: isEdit ? '${product['min_stock'] ?? 5}' : '5');
+
+    String? selectedBranchId = isEdit ? product['branch_id'] as String? : _branches.isNotEmpty ? _branches[0]['id'] as String : null;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF121212),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
-        title: Text(isEdit ? "Editar Producto" : "Registrar Nuevo Producto", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-        content: SizedBox(
-          width: 500,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: "Nombre del Producto", labelStyle: TextStyle(color: Colors.white38)),
-                  style: const TextStyle(color: Colors.white),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: skuController,
-                        decoration: const InputDecoration(labelText: "SKU / Código", labelStyle: TextStyle(color: Colors.white38)),
-                        style: const TextStyle(color: Colors.white),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF121212),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Colors.white10),
+          ),
+          title: Row(
+            children: [
+              Icon(isEdit ? LucideIcons.edit3 : LucideIcons.plus, color: Colors.white, size: 20),
+              const SizedBox(width: 12),
+              Text(
+                isEdit ? 'Editar Producto' : 'Nuevo Producto',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _dialogField(label: 'Nombre', icon: LucideIcons.box, controller: nameCtl),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(child: _dialogField(label: 'SKU', icon: LucideIcons.qrCode, controller: skuCtl)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _dialogField(label: 'Precio', icon: LucideIcons.dollarSign, controller: priceCtl, isNumber: true)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(child: _dialogField(label: 'Stock', icon: LucideIcons.package, controller: stockCtl, isNumber: true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _dialogField(label: 'Stock Mínimo', icon: LucideIcons.alertTriangle, controller: minStockCtl, isNumber: true)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _dialogField(label: 'Categoría', icon: LucideIcons.tag, controller: categoryCtl),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(child: _dialogField(label: 'Ubicación', icon: LucideIcons.mapPin, controller: locationCtl)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _dialogField(label: 'URL Imagen', icon: LucideIcons.image, controller: imageUrlCtl)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.warehouse, size: 16, color: Colors.white54),
+                      const SizedBox(width: 12),
+                      const Text('Sucursal', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w700)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedBranchId,
+                        dropdownColor: const Color(0xFF1E293B),
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        icon: const Icon(LucideIcons.chevronDown, color: Colors.white38, size: 18),
+                        isExpanded: true,
+                        hint: const Text('Sin sucursal', style: TextStyle(color: Colors.white38)),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Sin sucursal', style: TextStyle(color: Colors.white38))),
+                          ..._branches.map((b) => DropdownMenuItem(
+                            value: b['id'] as String,
+                            child: Text(b['name'] as String, style: const TextStyle(color: Colors.white)),
+                          )),
+                        ],
+                        onChanged: (v) => setDialogState(() => selectedBranchId = v),
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: TextField(
-                        controller: priceController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: "Precio de Venta", labelStyle: TextStyle(color: Colors.white38), prefixText: "\$ "),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: categoryController,
-                        decoration: const InputDecoration(labelText: "Categoría", labelStyle: TextStyle(color: Colors.white38)),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: TextField(
-                        controller: quantityController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: "Stock Inicial/Actual", labelStyle: TextStyle(color: Colors.white38)),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: locationController,
-                        decoration: const InputDecoration(labelText: "Ubicación (Pasillo/Estante)", labelStyle: TextStyle(color: Colors.white38)),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: TextField(
-                        controller: expirationController,
-                        decoration: const InputDecoration(labelText: "Fecha Caducidad", labelStyle: TextStyle(color: Colors.white38)),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: imageUrlController,
-                  decoration: const InputDecoration(labelText: "URL de la Imagen", labelStyle: TextStyle(color: Colors.white38)),
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                ToastUtils.showPromiseToast(
+                  context,
+                  message: isEdit ? 'Actualizando producto...' : 'Registrando producto...',
+                  promise: _saveProduct(
+                    id: isEdit ? product['id'] as String : null,
+                    name: nameCtl.text.trim(),
+                    sku: skuCtl.text.trim(),
+                    category: categoryCtl.text.trim(),
+                    price: double.tryParse(priceCtl.text) ?? 0,
+                    stockLevel: int.tryParse(stockCtl.text) ?? 0,
+                    minStock: int.tryParse(minStockCtl.text) ?? 5,
+                    location: locationCtl.text.trim(),
+                    imageUrl: imageUrlCtl.text.trim(),
+                    branchId: selectedBranchId,
+                  ),
+                  successMessage: isEdit ? 'Producto actualizado' : 'Producto registrado',
+                  errorMessage: 'Error al guardar producto',
+                );
+              },
+              child: Text(isEdit ? 'Guardar Cambios' : 'Registrar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dialogField({
+    required String label,
+    required IconData icon,
+    required TextEditingController controller,
+    bool isNumber = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: Colors.white38),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.05),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.white10),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.white10),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.red, width: 1.5),
             ),
           ),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: isEdit ? Colors.blueAccent : Colors.red),
-            onPressed: () {
-              Navigator.pop(context);
-              _submitProduct(
-                id: isEdit ? product['id'] : null,
-                name: nameController.text, 
-                sku: skuController.text, 
-                price: double.tryParse(priceController.text) ?? 0.0, 
-                category: categoryController.text,
-                quantity: int.tryParse(quantityController.text) ?? 0,
-                location: locationController.text,
-                expirationDate: expirationController.text,
-                imageUrl: imageUrlController.text
-              );
-            },
-            child: Text(isEdit ? "Guardar Cambios" : "Registrar"),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
-  Future<void> _submitProduct({
-    String? id,
-    required String name, 
-    required String sku, 
-    required double price, 
-    required String category,
-    required int quantity,
-    required String location,
-    required String expirationDate,
-    required String imageUrl,
-  }) async {
-    ToastUtils.showPromiseToast(
-      context, 
-      message: id == null ? "Registrando producto..." : "Actualizando producto...", 
-      promise: _executeProductSubmit(id, name, sku, price, category, quantity, location, expirationDate, imageUrl), 
-      successMessage: id == null ? "Producto registrado exitosamente" : "Producto actualizado", 
-      errorMessage: "Error en la operación"
-    );
-  }
-
-  Future<void> _executeProductSubmit(String? id, String name, String sku, double price, String category, int quantity, String location, String expirationDate, String imageUrl) async {
-    final tenantId = _myProfile?['tenant_id'];
-    final branchId = _branches.isNotEmpty ? _branches[0]['id'] : null;
-
-    final type = id == null ? 'insert_product' : 'update_product';
-    final payload = {
-      'id': id,
-      'name': name,
-      'sku': sku,
-      'price': price,
-      'category': category,
-      'metadata': {
-        'location': location,
-        'expiration_date': expirationDate,
-        'image_url': imageUrl
-      },
-      'quantity': quantity,
-      'branch_id': branchId,
-      'tenant_id': tenantId,
-    };
-
-    try {
-      final wasOnline = await OfflineSyncManager.instance.executeWithSync(
-        type: type,
-        payload: payload,
-        onlineAction: (supabase) async {
-          if (id == null) {
-            await supabase.from('inventory').insert({
-              'tenant_id': tenantId,
-              'branch_id': branchId,
-              'name': name,
-              'sku': sku,
-              'price': price,
-              'category': category,
-              'stock_level': quantity,
-              'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
-            });
-          } else {
-            await supabase.from('inventory').update({
-              'name': name,
-              'sku': sku,
-              'price': price,
-              'category': category,
-              'stock_level': quantity,
-              'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
-            }).eq('id', id);
-          }
-        },
-      );
-
-      if (!wasOnline) {
-        if (id == null) {
-          final tempId = 'temp_' + DateTime.now().millisecondsSinceEpoch.toString();
-          final mockProduct = {
-            'id': tempId,
-            'name': name,
-            'sku': sku,
-            'price': price,
-            'category': category,
-            'metadata': {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl},
-            'is_active': true,
-            'stock_level': quantity,
-            'branch_id': branchId,
-            'tenant_id': tenantId,
-          };
-          setState(() {
-            _inventoryItems.insert(0, mockProduct);
-            _filteredItems = List.from(_inventoryItems);
-          });
-        } else {
-          setState(() {
-            final idx = _inventoryItems.indexWhere((p) => p['id'] == id);
-            if (idx != -1) {
-              _inventoryItems[idx]['name'] = name;
-              _inventoryItems[idx]['sku'] = sku;
-              _inventoryItems[idx]['price'] = price;
-              _inventoryItems[idx]['category'] = category;
-              _inventoryItems[idx]['metadata'] = {'location': location, 'expiration_date': expirationDate, 'image_url': imageUrl};
-              _inventoryItems[idx]['stock_level'] = quantity;
-              _inventoryItems[idx]['branch_id'] = branchId;
-              _filteredItems = List.from(_inventoryItems);
-            }
-          });
-        }
-        if (mounted) {
-          ToastUtils.showSuccessToast(context, message: "Cambio guardado localmente (Sin Conexión)");
-        }
-      } else {
-        _fetchInventory();
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastUtils.showErrorToast(context, message: "Error al guardar: $e");
-      }
-    }
-  }
-
-  void _deleteProduct(Map<String, dynamic> product) {
+  void _confirmDelete(String id) {
+    final item = _items.firstWhere((e) => e['id'] == id);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF121212),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
-        title: const Text("Eliminar Producto", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
-        content: Text("¿Estás seguro de que deseas eliminar permanentemente '${product['name']}'? Esta acción no se puede deshacer.", style: const TextStyle(color: Colors.white70)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        title: Row(
+          children: [
+            Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
+            const SizedBox(width: 12),
+            const Text('Eliminar Producto', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.red.withOpacity(0.2)),
+              ),
+              child: Icon(LucideIcons.alertTriangle, size: 48, color: Colors.redAccent.withOpacity(0.8)),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '¿Eliminar "${item['name']}" permanentemente?',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text('Esta acción no se puede deshacer.', style: TextStyle(color: Colors.white38, fontSize: 13)),
+          ],
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar", style: TextStyle(color: Colors.white38))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            ),
             onPressed: () {
-              Navigator.pop(context);
-              _executeDeleteProduct(product['id']);
+              Navigator.pop(ctx);
+              ToastUtils.showPromiseToast(
+                context,
+                message: 'Eliminando producto...',
+                promise: _supabase.from('inventory').delete().eq('id', id).then((_) => _loadData()),
+                successMessage: 'Producto eliminado',
+                errorMessage: 'Error al eliminar producto',
+              );
             },
-            child: const Text("Eliminar", style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _executeDeleteProduct(String id) async {
-    try {
-      final wasOnline = await OfflineSyncManager.instance.executeWithSync(
-        type: 'delete_product',
-        payload: {'id': id},
-        onlineAction: (supabase) async {
-          await supabase.from('inventory').delete().eq('id', id);
-        },
-      );
-
-      if (!wasOnline) {
-        setState(() {
-          _inventoryItems.removeWhere((p) => p['id'] == id);
-          _filteredItems = List.from(_inventoryItems);
-        });
-        if (mounted) {
-          ToastUtils.showSuccessToast(context, message: "Producto eliminado localmente (Sin Conexión)");
-        }
-      } else {
-        _fetchInventory();
-      }
-    } catch (e) {
-      if (mounted) {
-        ToastUtils.showErrorToast(context, message: "Error al eliminar: $e");
-      }
-    }
-  }
-
-  void _toggleProductStatus(Map<String, dynamic> product) {
-    final bool currentStatus = product['is_active'] ?? true;
-    ToastUtils.showPromiseToast(
-      context, 
-      message: currentStatus ? "Desactivando..." : "Activando...", 
-      promise: Supabase.instance.client.from('inventory').update({'is_active': !currentStatus}).eq('id', product['id']).then((_) => _fetchInventory()), 
-      successMessage: "Estado actualizado", 
-      errorMessage: "Error al actualizar estado"
+  void _confirmBatchDelete() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        title: Row(
+          children: [
+            Icon(LucideIcons.trash2, color: Colors.redAccent, size: 20),
+            const SizedBox(width: 12),
+            Text('Eliminar ${_selectedIds.length} productos', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.red.withOpacity(0.2)),
+              ),
+              child: Icon(LucideIcons.package, size: 48, color: Colors.redAccent.withOpacity(0.8)),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '¿Eliminar ${_selectedIds.length} productos permanentemente?',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final ids = _selectedIds.toList();
+              ToastUtils.showPromiseToast(
+                context,
+                message: 'Eliminando productos...',
+                promise: Future.wait(ids.map((id) => _supabase.from('inventory').delete().eq('id', id))).then((_) {
+                  _selectedIds.clear();
+                  return _loadData();
+                }),
+                successMessage: '${ids.length} productos eliminados',
+                errorMessage: 'Error al eliminar productos',
+              );
+            },
+            child: const Text('Eliminar Todo'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -438,214 +534,278 @@ class _InventoryScreenState extends State<InventoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_title, style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 32, fontWeight: FontWeight.w900)),
-                    const SizedBox(height: 8),
-                    const Text("Gestión centralizada de stock y catálogo.", style: TextStyle(color: Colors.white60, fontSize: 16)),
-                  ],
-                ),
-                Row(
-                  children: [
-                    if (_branches.length > 1)
-                      _buildBranchSelector(),
-                    if (_branches.length > 1) const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: () => _loadData(),
-                      icon: const Icon(LucideIcons.refreshCw, size: 16),
-                      label: const Text("Sincronizar"),
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.surfaceLight, foregroundColor: Colors.white),
-                    ),
-                    const SizedBox(width: 16),
-                    ElevatedButton.icon(
-                      onPressed: () => _showProductForm(),
-                      icon: const Icon(LucideIcons.plus),
-                      label: const Text("Nuevo Producto"),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                    ),
-                  ],
-                ),
-              ],
-            ).animate().fadeIn().slideY(begin: -0.2),
-            const SizedBox(height: 48),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: "Buscar por SKU o nombre...",
-                        prefixIcon: const Icon(LucideIcons.search, color: Colors.white24, size: 18),
-                        filled: true,
-                        fillColor: Colors.black.withOpacity(0.2),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    if (_isLoading)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 24.0),
-                        child: SkeletonLoader.table(rows: 6, columns: 7),
-                      )
-                    else if (_filteredItems.isEmpty)
-                      const EmptyStateWidget(message: "No hay productos disponibles", icon: LucideIcons.package)
-                    else
-                      _buildInventoryTable(context),
-                  ],
-                ),
-              ),
-            ).animate().fadeIn().slideY(begin: 0.1),
+            _buildHeader().animate().fadeIn().slideY(begin: -0.2),
+            const SizedBox(height: 24),
+            if (_selectedIds.isNotEmpty)
+              _buildBatchBar().animate().fadeIn().scale(),
+            const SizedBox(height: 24),
+            _buildMainCard().animate().fadeIn().slideY(begin: 0.1),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBranchSelector() {
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Inventario',
+              style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 32, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Gestión centralizada de stock y catálogo.',
+              style: TextStyle(color: Colors.white60, fontSize: 16),
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            ElevatedButton.icon(
+              onPressed: _loadData,
+              icon: const Icon(LucideIcons.refreshCw, size: 16),
+              label: const Text('Sincronizar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.surfaceLight,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 16),
+            ElevatedButton.icon(
+              onPressed: () => _showProductForm(),
+              icon: const Icon(LucideIcons.plus),
+              label: const Text('Nuevo Producto'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBatchBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        color: Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.red.withOpacity(0.2)),
       ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedBranch?['id'] ?? 'all',
-          dropdownColor: const Color(0xFF1E293B),
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-          icon: const Icon(LucideIcons.chevronDown, color: Colors.white54, size: 16),
-          items: [
-            const DropdownMenuItem(value: 'all', child: Text("Todas las sucursales")),
-            ..._branches.map((b) => DropdownMenuItem(
-              value: b['id'],
-              child: Row(
-                children: [
-                  Container(
-                    width: 8, height: 8,
-                    decoration: BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(b['name'] ?? 'Sucursal'),
-                ],
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            '${_selectedIds.length} producto(s) seleccionado(s)',
+            style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
+          ),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: _confirmBatchDelete,
+                icon: const Icon(LucideIcons.trash2, size: 16),
+                label: const Text('Eliminar selección'),
+                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               ),
-            )),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => setState(() => _selectedIds.clear()),
+                child: const Text('Cancelar', style: TextStyle(color: Colors.white38)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMainCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            _buildToolbar(),
+            const SizedBox(height: 24),
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: CircularProgressIndicator(color: Colors.red)),
+              )
+            else if (_filteredItems.isEmpty)
+              const EmptyStateWidget(message: 'No hay productos disponibles', icon: LucideIcons.package)
+            else
+              _buildTable(),
           ],
-          onChanged: (val) {
-            setState(() {
-              if (val == 'all') {
-                _selectedBranch = null;
-              } else {
-                _selectedBranch = _branches.firstWhere((b) => b['id'] == val);
-              }
-            });
-            _filterInventory();
-          },
         ),
       ),
     );
   }
 
-  Widget _buildInventoryTable(BuildContext context) {
+  Widget _buildToolbar() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Buscar por nombre o SKU...',
+              prefixIcon: const Icon(LucideIcons.search, size: 18, color: Colors.white24),
+              filled: true,
+              fillColor: Colors.black.withOpacity(0.2),
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _categoryFilter,
+              dropdownColor: const Color(0xFF1E293B),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              hint: const Text('Todas las categorías', style: TextStyle(color: Colors.white38, fontSize: 13)),
+              icon: const Icon(LucideIcons.chevronDown, color: Colors.white38, size: 16),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Todas las categorías')),
+                ..._categories.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+              ],
+              onChanged: (v) {
+                setState(() => _categoryFilter = v);
+                _applyFilters();
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTable() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
-        headingTextStyle: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
+        headingTextStyle: const TextStyle(color: Colors.white54, fontWeight: FontWeight.w700, fontSize: 11),
+        dataTextStyle: const TextStyle(color: Colors.white, fontSize: 13),
         columns: const [
-          DataColumn(label: Text("Estado")),
-          DataColumn(label: Text("Producto")),
-          DataColumn(label: Text("SKU")),
-          DataColumn(label: Text("Categoría")),
-          DataColumn(label: Text("Precio")),
-          DataColumn(label: Text("Stock")),
-          DataColumn(label: Text("Pronóstico")),
-          DataColumn(label: Text("Acciones")),
+          DataColumn(label: Text('')),
+          DataColumn(label: Text('Producto')),
+          DataColumn(label: Text('SKU')),
+          DataColumn(label: Text('Categoría')),
+          DataColumn(label: Text('Precio')),
+          DataColumn(label: Text('Stock')),
+          DataColumn(label: Text('Stock Mín.')),
+          DataColumn(label: Text('Acciones')),
         ],
         rows: _filteredItems.map((item) {
-          final String name = item['name'] ?? 'Desconocido';
-          final String sku = item['sku'] ?? 'N/A';
-          final String category = item['category'] ?? 'N/A';
-          final double priceNum = (item['price'] as num?)?.toDouble() ?? 0.0;
-          final bool isActive = item['is_active'] ?? true;
-          
-          int stock = (item['stock_level'] as num?)?.toInt() ?? 0;
-
-          final prediction = InventoryPredictor.predictRestockDate(
-            currentStock: stock,
-            salesHistory: [],
-            threshold: 5,
-          );
+          final id = item['id'] as String;
+          final name = item['name'] as String? ?? '';
+          final sku = item['sku'] as String? ?? '';
+          final category = item['category'] as String? ?? '';
+          final price = (item['price'] as num?)?.toDouble() ?? 0;
+          final stock = (item['stock_level'] as num?)?.toInt() ?? 0;
+          final minStock = (item['min_stock'] as num?)?.toInt() ?? 5;
+          final meta = item['metadata'] as Map<String, dynamic>?;
+          final imageUrl = meta?['image_url'] as String?;
+          final isSelected = _selectedIds.contains(id);
+          final isLowStock = stock <= minStock;
 
           return DataRow(
-            color: WidgetStateProperty.resolveWith<Color?>((states) => isActive ? null : Colors.red.withOpacity(0.05)),
+            color: WidgetStateProperty.resolveWith<Color?>((_) => isSelected ? Colors.red.withOpacity(0.05) : null),
             cells: [
               DataCell(
-                Tooltip(
-                  message: isActive ? "Activo" : "Inactivo",
-                  child: Container(
-                    width: 12, height: 12,
-                    decoration: BoxDecoration(
-                      color: isActive ? Colors.greenAccent : Colors.redAccent,
-                      shape: BoxShape.circle
-                    ),
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: isSelected,
+                    onChanged: (_) => _toggleSelect(id),
+                    activeColor: Colors.red,
+                    side: const BorderSide(color: Colors.white24),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                   ),
-                )
+                ),
               ),
               DataCell(
                 Row(
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: (item['metadata'] != null && item['metadata']['image_url'] != null && (item['metadata']['image_url'] as String).isNotEmpty)
-                        ? Image.network(
-                            item['metadata']['image_url'],
-                            width: 32, height: 32,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => Container(
-                              width: 32, height: 32,
+                      child: imageUrl != null && imageUrl.isNotEmpty
+                          ? Image.network(
+                              imageUrl,
+                              width: 34,
+                              height: 34,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                width: 34,
+                                height: 34,
+                                color: Colors.white10,
+                                child: const Icon(LucideIcons.box, size: 16, color: Colors.white38),
+                              ),
+                            )
+                          : Container(
+                              width: 34,
+                              height: 34,
                               color: Colors.white10,
                               child: const Icon(LucideIcons.box, size: 16, color: Colors.white38),
                             ),
-                          )
-                        : Container(
-                            width: 32, height: 32,
-                            color: Colors.white10,
-                            child: const Icon(LucideIcons.box, size: 16, color: Colors.white38),
-                          ),
                     ),
                     const SizedBox(width: 12),
-                    Text(name, style: TextStyle(fontWeight: FontWeight.bold, decoration: isActive ? null : TextDecoration.lineThrough, color: isActive ? Colors.white : Colors.white54)),
+                    Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
-              DataCell(Text(sku, style: const TextStyle(color: Colors.white38, fontSize: 12))),
+              DataCell(Text(sku, style: const TextStyle(color: Colors.white38, fontSize: 12, fontFamily: 'monospace'))),
               DataCell(Text(category, style: const TextStyle(color: Colors.white54))),
-              DataCell(Text("\$${priceNum.toStringAsFixed(2)}")),
-              DataCell(Text(stock.toString(), style: TextStyle(color: stock < 5 ? Colors.redAccent : Colors.greenAccent, fontWeight: FontWeight.bold))),
-              DataCell(_buildPredictionBadge(stock, prediction.status, prediction.daysRemaining)),
+              DataCell(Text('\$${price.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w600))),
+              DataCell(
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isLowStock ? Colors.red.withOpacity(0.15) : Colors.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    stock.toString(),
+                    style: TextStyle(
+                      color: isLowStock ? Colors.redAccent : Colors.greenAccent,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+              DataCell(Text(minStock.toString(), style: const TextStyle(color: Colors.white38))),
               DataCell(Row(
                 children: [
                   IconButton(
-                    icon: Icon(isActive ? LucideIcons.eyeOff : LucideIcons.eye, size: 16, color: Colors.orangeAccent), 
-                    tooltip: isActive ? "Desactivar" : "Activar",
-                    onPressed: () => _toggleProductStatus(item)
+                    icon: const Icon(LucideIcons.edit3, size: 16, color: Colors.blueAccent),
+                    tooltip: 'Editar',
+                    onPressed: () => _showProductForm(product: item),
                   ),
                   IconButton(
-                    icon: const Icon(LucideIcons.edit, size: 16, color: Colors.blueAccent), 
-                    tooltip: "Editar",
-                    onPressed: () => _showProductForm(product: item)
-                  ),
-                  IconButton(
-                    icon: Icon(LucideIcons.trash2, size: 16, color: Colors.redAccent.withOpacity(0.8)), 
-                    tooltip: "Eliminar",
-                    onPressed: () => _deleteProduct(item)
+                    icon: Icon(LucideIcons.trash2, size: 16, color: Colors.redAccent.withOpacity(0.7)),
+                    tooltip: 'Eliminar',
+                    onPressed: () => _confirmDelete(id),
                   ),
                 ],
               )),
@@ -655,43 +815,36 @@ class _InventoryScreenState extends State<InventoryScreen> {
       ),
     );
   }
+}
 
-  Widget _buildPredictionBadge(int stock, String status, int? daysRemaining) {
-    Color bgColor;
-    Color textColor;
-    String label;
+class EmptyStateWidget extends StatelessWidget {
+  final String message;
+  final IconData icon;
 
-    if (stock < 3) {
-      bgColor = Colors.red.withOpacity(0.15);
-      textColor = Colors.redAccent;
-      label = 'CRÍTICO';
-    } else if (daysRemaining != null && daysRemaining <= 2) {
-      bgColor = Colors.red.withOpacity(0.15);
-      textColor = Colors.redAccent;
-      label = '$daysRemaining día(s)';
-    } else if (daysRemaining != null && daysRemaining <= 7) {
-      bgColor = Colors.orange.withOpacity(0.15);
-      textColor = Colors.orange;
-      label = '$daysRemaining día(s)';
-    } else if (stock < 10) {
-      bgColor = Colors.amber.withOpacity(0.15);
-      textColor = Colors.amber;
-      label = 'Stock bajo';
-    } else {
-      bgColor = Colors.green.withOpacity(0.1);
-      textColor = Colors.greenAccent;
-      label = 'Saludable';
-    }
+  const EmptyStateWidget({
+    super.key,
+    this.message = 'No hay datos disponibles',
+    this.icon = LucideIcons.inbox,
+  });
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(6),
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 64, color: Colors.white.withOpacity(0.03)),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              style: const TextStyle(color: Colors.white24, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
-      child: Text(label,
-        style: TextStyle(color: textColor, fontSize: 10, fontWeight: FontWeight.w900)),
     );
   }
-
 }

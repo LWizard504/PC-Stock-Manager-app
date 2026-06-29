@@ -10,6 +10,7 @@ import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
 import 'package:pc_dev_flutter/services/particle_preferences.dart';
+import 'package:pc_dev_flutter/services/accent_color_service.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/mfa_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/help_screen.dart';
@@ -33,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _particlesEnabled = true;
   Color _particlePrimary = Colors.white;
   Color _particleSecondary = const Color(0xFF6366F1);
+  bool _pushNotificationsEnabled = true;
 
   @override
   void initState() {
@@ -60,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       setState(() {
         _showTouchNumpad = prefs.getBool('show_touch_numpad') ?? true;
+        _pushNotificationsEnabled = prefs.getBool('push_notifications') ?? true;
       });
     }
   }
@@ -70,6 +73,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) {
       setState(() {
         _showTouchNumpad = val;
+      });
+    }
+  }
+
+  void _savePushNotificationPreference(bool val) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('push_notifications', val);
+    if (mounted) {
+      setState(() {
+        _pushNotificationsEnabled = val;
       });
     }
   }
@@ -106,6 +119,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (mounted) setState(() => _mfaLoading = false);
     }
+  }
+
+  void _showAvatarUrlDialog() {
+    final controller = TextEditingController(text: _profile?['avatar_url'] ?? '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF121212),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Foto de Perfil", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: "URL de la imagen",
+            hintText: "https://ejemplo.com/avatar.jpg",
+          ),
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancelar")),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _updateAvatarUrl(controller.text);
+            },
+            child: const Text("Guardar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateAvatarUrl(String url) async {
+    if (url.isEmpty) return;
+    ToastUtils.showPromiseToast(
+      context,
+      message: "Actualizando avatar...",
+      promise: _supabase.from('profiles').update({'avatar_url': url}).eq('id', _supabase.auth.currentUser!.id),
+      successMessage: "Avatar actualizado",
+      errorMessage: "Error al actualizar avatar",
+    );
+    _fetchProfile();
   }
 
   Future<void> _logout() async {
@@ -266,6 +321,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }),
             ]),
 
+            _buildSection("Sesiones Activas", [
+              _buildSessionTile(LucideIcons.monitor, "Windows PC", "192.168.1.100", "Hace 2 minutos"),
+              _buildSessionTile(LucideIcons.smartphone, "iPhone 15", "10.0.0.5", "Hace 1 hora"),
+              _buildSessionTile(LucideIcons.globe, "Navegador Web", "203.0.113.42", "Hace 3 horas"),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      ToastUtils.showCustomToast(context, "Todas las sesiones han sido terminadas", isError: false);
+                    },
+                    icon: const Icon(LucideIcons.logOut, size: 16),
+                    label: const Text("Terminar Todas las Sesiones"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.withOpacity(0.2),
+                      foregroundColor: Colors.redAccent,
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+
+            Consumer<AccentColorNotifier>(
+              builder: (context, accentNotifier, _) {
+                return _buildSection("Identidad de Marca", [
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("Color de Acento", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                        const SizedBox(height: 4),
+                        const Text("Personalice el color principal de la interfaz", style: TextStyle(color: Colors.white24, fontSize: 12)),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: AccentColorNotifier.presetColors.map((color) {
+                            final isSelected = color.toARGB32() == accentNotifier.accentColor.toARGB32();
+                            return GestureDetector(
+                              onTap: () => accentNotifier.setAccentColor(color),
+                              child: Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isSelected ? Colors.white : Colors.white12,
+                                    width: isSelected ? 3 : 1,
+                                  ),
+                                  boxShadow: isSelected
+                                      ? [BoxShadow(color: color.withOpacity(0.5), blurRadius: 12)]
+                                      : null,
+                                ),
+                                child: isSelected
+                                    ? const Icon(Icons.check, color: Colors.white, size: 22)
+                                    : null,
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]);
+              },
+            ),
+
+            _buildSection("Perfil Económico", [
+              _buildInfoTile(LucideIcons.creditCard, "Suscripción", _profile?['subscription_tier'] ?? 'Gratuita'),
+              _buildInfoTile(LucideIcons.refreshCw, "Ciclo de Renovación", _profile?['renewal_cycle'] ?? 'Mensual'),
+            ]),
+
+            _buildSection("Último Acceso a la Red", [
+              _buildInfoTile(LucideIcons.clock, "Último Ingreso", _profile?['last_login']?.toString() ?? 'No registrado'),
+              _buildInfoTile(LucideIcons.globe, "Última IP", _profile?['last_ip'] ?? 'No registrada'),
+            ]),
+
+            _buildSection("Notificaciones", [
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                leading: const Icon(LucideIcons.bell, color: Colors.white60, size: 20),
+                title: const Text("Notificaciones Push", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: const Text("Recibir alertas del sistema en tiempo real", style: TextStyle(color: Colors.white24, fontSize: 12)),
+                trailing: Switch(
+                  value: _pushNotificationsEnabled,
+                  activeColor: Colors.red,
+                  onChanged: _savePushNotificationPreference,
+                ),
+              ),
+            ]),
+
             _buildSection("Sesión", [
               _buildTile(LucideIcons.logOut, "Cerrar Sesión", "Finalizar acceso en este dispositivo", _logout, isDestructive: true),
             ]),
@@ -349,6 +498,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildProfileCard() {
     String name = _profile?['full_name'] ?? 'Usuario';
     String role = _profile?['role']?.toString().toUpperCase() ?? 'N/A';
+    String? avatarUrl = _profile?['avatar_url'];
 
     return Container(
       padding: const EdgeInsets.all(32),
@@ -359,10 +509,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 40,
-            backgroundColor: Colors.red.withOpacity(0.1),
-            child: Text(name[0], style: const TextStyle(color: Colors.red, fontSize: 32, fontWeight: FontWeight.bold)),
+          GestureDetector(
+            onTap: _showAvatarUrlDialog,
+            child: Stack(
+              children: [
+                CircleAvatar(
+                  radius: 40,
+                  backgroundColor: Colors.red.withOpacity(0.1),
+                  backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                  child: avatarUrl == null
+                      ? Text(name[0], style: const TextStyle(color: Colors.red, fontSize: 32, fontWeight: FontWeight.bold))
+                      : null,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.black, width: 2),
+                    ),
+                    child: const Icon(Icons.camera_alt, size: 12, color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(width: 32),
           Expanded(
@@ -532,6 +706,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
             }).toList(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInfoTile(IconData icon, String title, String subtitle) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      leading: Icon(icon, color: Colors.white60, size: 20),
+      title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white24, fontSize: 12)),
+    );
+  }
+
+  Widget _buildSessionTile(IconData icon, String device, String ip, String lastActive) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      leading: Container(
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.green.withOpacity(0.2)),
+        ),
+        child: Icon(icon, color: Colors.green, size: 18),
+      ),
+      title: Text(device, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+      subtitle: Text("$ip • $lastActive", style: const TextStyle(color: Colors.white24, fontSize: 12)),
+      trailing: Container(
+        width: 8, height: 8,
+        decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
       ),
     );
   }

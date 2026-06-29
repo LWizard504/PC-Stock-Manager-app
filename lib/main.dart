@@ -10,6 +10,7 @@ import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:pc_dev_flutter/services/tray_service.dart';
+import 'package:pc_dev_flutter/services/accent_color_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,10 +42,14 @@ void main() async {
     await windowManager.setPreventClose(true);
   });
 
+  final accentNotifier = AccentColorNotifier();
+  await accentNotifier.load();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => LocaleProvider()),
+        ChangeNotifierProvider.value(value: accentNotifier),
       ],
       child: const StockManagerApp(),
     ),
@@ -87,6 +92,8 @@ class _StockManagerAppState extends State<StockManagerApp> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final localeProvider = Provider.of<LocaleProvider>(context);
+    final accentNotifier = Provider.of<AccentColorNotifier>(context);
+    final accentColor = accentNotifier.accentColor;
 
     return MaterialApp(
       title: 'StockManager',
@@ -96,9 +103,9 @@ class _StockManagerAppState extends State<StockManagerApp> with WindowListener {
         useMaterial3: true,
         brightness: Brightness.dark,
         scaffoldBackgroundColor: AppTheme.backgroundDark,
-        colorScheme: const ColorScheme.dark(
-          primary: AppTheme.primaryColor,
-          secondary: AppTheme.secondaryColor,
+        colorScheme: ColorScheme.dark(
+          primary: accentColor,
+          secondary: accentColor,
           surface: AppTheme.surfaceDark,
         ),
         textTheme: GoogleFonts.interTextTheme(Theme.of(context).textTheme).apply(

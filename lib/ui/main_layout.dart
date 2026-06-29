@@ -26,6 +26,12 @@ import 'package:pc_dev_flutter/ui/screens/manager/analytics_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/manager/sales_history_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/manager/sessions_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/it/tickets_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/it/users_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/documentation_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/shared/support_relay_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/admin/employees_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/admin/account_screen.dart';
+import 'package:pc_dev_flutter/ui/screens/employee/inventory_view_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
@@ -313,18 +319,23 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: "Node Status", icon: LucideIcons.activity, screen: const NodeStatusScreen()),
           SidebarItem(title: "Downloads", icon: LucideIcons.downloadCloud, screen: const DownloadsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
+          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
+          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
           SidebarItem(title: "Settings", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.admin:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const AdminDashboardScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: t('employees_title'), icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: t('employees_title'), icon: LucideIcons.users, screen: const EmployeesScreen()),
           SidebarItem(title: t('sessions_title'), icon: LucideIcons.monitorSmartphone, screen: const SessionsScreen()),
           SidebarItem(title: t('sales_history_title'), icon: LucideIcons.history, screen: const SalesHistoryScreen()),
           SidebarItem(title: "Pagos y Suscripción", icon: LucideIcons.creditCard, screen: const PaymentsScreen()),
           SidebarItem(title: "Ventas Activas", icon: LucideIcons.receipt, screen: const SalesScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
+          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
+          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
+          SidebarItem(title: "Account", icon: LucideIcons.userCircle, screen: const AdminAccountScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.manager:
@@ -335,22 +346,28 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: t('sessions_title'), icon: LucideIcons.monitorSmartphone, screen: const SessionsScreen()),
           SidebarItem(title: t('sales_history_title'), icon: LucideIcons.history, screen: const SalesHistoryScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
+          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
+          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.it:
         return [
           SidebarItem(title: "Dashboard", icon: LucideIcons.layoutDashboard, screen: const ITDashboardScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
-          SidebarItem(title: "Restablecer Credenciales", icon: LucideIcons.users, screen: const UsersScreen()),
+          SidebarItem(title: "Restablecer Credenciales", icon: LucideIcons.users, screen: const ITUsersScreen()),
           SidebarItem(title: t('tickets_title'), icon: LucideIcons.ticket, screen: const TicketsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
+          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
+          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.employee:
         return [
           SidebarItem(title: t('pos_title'), icon: LucideIcons.shoppingCart, screen: const POSScreen()),
-          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
+          SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryViewScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
+          SidebarItem(title: "Documentation", icon: LucideIcons.bookOpen, screen: const DocumentationScreen()),
+          SidebarItem(title: "Support", icon: LucideIcons.lifeBuoy, screen: const SupportRelayScreen()),
           SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
     }
