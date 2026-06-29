@@ -10,6 +10,8 @@ import 'package:provider/provider.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
+import 'package:pc_dev_flutter/ui/widgets/particle_background.dart';
+import 'package:pc_dev_flutter/services/particle_preferences.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/mfa_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -27,11 +29,28 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _rememberMe = false;
   int _attempts = 0;
   DateTime? _lockoutUntil;
+  Color _particlePrimary = Colors.white;
+  Color _particleSecondary = const Color(0xFF6366F1);
+  bool _particlesEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadRememberedEmail();
+    _loadParticlePrefs();
+  }
+
+  void _loadParticlePrefs() async {
+    final enabled = await ParticlePreferences.isEnabled();
+    final primary = await ParticlePreferences.getPrimaryColor();
+    final secondary = await ParticlePreferences.getSecondaryColor();
+    if (mounted) {
+      setState(() {
+        _particlesEnabled = enabled;
+        _particlePrimary = primary;
+        _particleSecondary = secondary;
+      });
+    }
   }
 
   void _loadRememberedEmail() async {
@@ -179,7 +198,16 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A), // Near black background
-      body: Column(
+      body: Stack(
+        children: [
+          if (_particlesEnabled)
+            Positioned.fill(
+              child: ParticleBackground(
+                primaryColor: _particlePrimary,
+                secondaryColor: _particleSecondary,
+              ),
+            ),
+          Column(
         children: [
           const CustomWindowBar(showLogo: true),
           Expanded(
@@ -435,6 +463,8 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ),
+        ],
+      ),
         ],
       ),
     );

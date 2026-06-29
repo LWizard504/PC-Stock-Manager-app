@@ -9,12 +9,15 @@ import 'package:provider/provider.dart';
 import 'package:pc_dev_flutter/context/locale_provider.dart';
 import 'package:pc_dev_flutter/ui/screens/launcher_screen.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/services/particle_preferences.dart';
 import 'package:pc_dev_flutter/ui/screens/login_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/mfa_screen.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/help_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final VoidCallback? onParticleChanged;
+
+  const SettingsScreen({super.key, this.onParticleChanged});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -27,12 +30,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showTouchNumpad = true;
   bool _mfaEnabled = false;
   bool _mfaLoading = true;
+  bool _particlesEnabled = true;
+  Color _particlePrimary = Colors.white;
+  Color _particleSecondary = const Color(0xFF6366F1);
 
   @override
   void initState() {
     super.initState();
     _fetchProfile();
     _loadPreferences();
+    _loadParticlePrefs();
+  }
+
+  void _loadParticlePrefs() async {
+    final enabled = await ParticlePreferences.isEnabled();
+    final primary = await ParticlePreferences.getPrimaryColor();
+    final secondary = await ParticlePreferences.getSecondaryColor();
+    if (mounted) {
+      setState(() {
+        _particlesEnabled = enabled;
+        _particlePrimary = primary;
+        _particleSecondary = secondary;
+      });
+    }
   }
 
   void _loadPreferences() async {
@@ -228,6 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             
+            _buildParticleSection(),
             _buildSection("Sistema y Actualizaciones", [
               _buildTile(LucideIcons.download, "Buscar Actualizaciones", "Verificar optimizaciones y reiniciar launcher", () {
                 Navigator.of(context).pushAndRemoveUntil(
@@ -367,6 +388,152 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     ).animate().fadeIn().slideX();
+  }
+
+  static const List<Color> _presetColors = [
+    Colors.white,
+    Color(0xFF6366F1), // Indigo
+    Color(0xFF8B5CF6), // Purple
+    Color(0xFF10B981), // Emerald
+    Color(0xFFEF4444), // Red
+    Color(0xFFF59E0B), // Amber
+    Color(0xFF06B6D4), // Cyan
+    Color(0xFFEC4899), // Pink
+    Color(0xFFFF6B35), // Orange
+    Color(0xFF84CC16), // Lime
+  ];
+
+  Widget _buildParticleSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 16),
+          child: Text("FONDO DE PARTÍCULAS", style: const TextStyle(color: Colors.white38, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2)),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceDark,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withOpacity(0.05)),
+          ),
+          child: Column(
+            children: [
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                leading: Icon(LucideIcons.sparkles, color: _particlesEnabled ? Colors.white60 : Colors.white24, size: 20),
+                title: Text("Partículas de Fondo", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                subtitle: Text(
+                  _particlesEnabled ? "Visible en inicio y fondo del sistema" : "Oculto",
+                  style: const TextStyle(color: Colors.white24, fontSize: 12),
+                ),
+                trailing: Switch(
+                  value: _particlesEnabled,
+                  activeColor: Colors.red,
+                  onChanged: (val) async {
+                    await ParticlePreferences.setEnabled(val);
+                    setState(() => _particlesEnabled = val);
+                    widget.onParticleChanged?.call();
+                  },
+                ),
+              ),
+              if (_particlesEnabled) ...[
+                const Divider(color: Colors.white10, height: 1),
+                _buildColorPicker(
+                  title: "Color Primario",
+                  subtitle: "Partículas base del fondo",
+                  selectedColor: _particlePrimary,
+                  onColorSelected: (color) async {
+                    await ParticlePreferences.setPrimaryColor(color);
+                    setState(() => _particlePrimary = color);
+                    widget.onParticleChanged?.call();
+                  },
+                ),
+                const Divider(color: Colors.white10, height: 1),
+                _buildColorPicker(
+                  title: "Color Secundario",
+                  subtitle: "Partículas de acento (10%)",
+                  selectedColor: _particleSecondary,
+                  onColorSelected: (color) async {
+                    await ParticlePreferences.setSecondaryColor(color);
+                    setState(() => _particleSecondary = color);
+                    widget.onParticleChanged?.call();
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  Widget _buildColorPicker({
+    required String title,
+    required String subtitle,
+    required Color selectedColor,
+    required ValueChanged<Color> onColorSelected,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: selectedColor,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white24),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(color: Colors.white24, fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _presetColors.map((color) {
+              final isSelected = color.toARGB32() == selectedColor.toARGB32();
+              return GestureDetector(
+                onTap: () => onColorSelected(color),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected ? Colors.white : Colors.white12,
+                      width: isSelected ? 2 : 1,
+                    ),
+                    boxShadow: isSelected
+                        ? [BoxShadow(color: color.withOpacity(0.5), blurRadius: 8)]
+                        : null,
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check, color: Colors.black54, size: 16)
+                      : null,
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSection(String title, List<Widget> children) {

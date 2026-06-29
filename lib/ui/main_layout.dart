@@ -31,6 +31,8 @@ import 'package:pc_dev_flutter/services/offline_sync_manager.dart';
 import 'package:pc_dev_flutter/ui/widgets/custom_window_bar.dart';
 import 'package:pc_dev_flutter/services/config.dart';
 import 'package:pc_dev_flutter/services/signaling_service.dart';
+import 'package:pc_dev_flutter/services/particle_preferences.dart';
+import 'package:pc_dev_flutter/ui/widgets/particle_background.dart';
 import 'package:pc_dev_flutter/ui/screens/shared/call_screen.dart';
 
 class SidebarItem {
@@ -53,11 +55,32 @@ class _MainLayoutState extends State<MainLayout> {
   bool _isExpanded = true;
   AppUser? _currentUser;
   bool _isLoadingProfile = true;
+  Color _particlePrimary = Colors.white;
+  Color _particleSecondary = const Color(0xFF6366F1);
+  bool _particlesEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _loadUserProfile();
+    _loadParticlePrefs();
+  }
+
+  void _loadParticlePrefs() async {
+    final enabled = await ParticlePreferences.isEnabled();
+    final primary = await ParticlePreferences.getPrimaryColor();
+    final secondary = await ParticlePreferences.getSecondaryColor();
+    if (mounted) {
+      setState(() {
+        _particlesEnabled = enabled;
+        _particlePrimary = primary;
+        _particleSecondary = secondary;
+      });
+    }
+  }
+
+  void _reloadParticlePrefs() {
+    _loadParticlePrefs();
   }
 
   Future<void> _loadUserProfile() async {
@@ -290,7 +313,7 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: "Node Status", icon: LucideIcons.activity, screen: const NodeStatusScreen()),
           SidebarItem(title: "Downloads", icon: LucideIcons.downloadCloud, screen: const DownloadsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Settings", icon: LucideIcons.settings, screen: const SettingsScreen()),
+          SidebarItem(title: "Settings", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.admin:
         return [
@@ -302,7 +325,7 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: "Pagos y Suscripción", icon: LucideIcons.creditCard, screen: const PaymentsScreen()),
           SidebarItem(title: "Ventas Activas", icon: LucideIcons.receipt, screen: const SalesScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
+          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.manager:
         return [
@@ -312,7 +335,7 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: t('sessions_title'), icon: LucideIcons.monitorSmartphone, screen: const SessionsScreen()),
           SidebarItem(title: t('sales_history_title'), icon: LucideIcons.history, screen: const SalesHistoryScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
+          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.it:
         return [
@@ -321,14 +344,14 @@ class _MainLayoutState extends State<MainLayout> {
           SidebarItem(title: "Restablecer Credenciales", icon: LucideIcons.users, screen: const UsersScreen()),
           SidebarItem(title: t('tickets_title'), icon: LucideIcons.ticket, screen: const TicketsScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
+          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
       case UserRole.employee:
         return [
           SidebarItem(title: t('pos_title'), icon: LucideIcons.shoppingCart, screen: const POSScreen()),
           SidebarItem(title: t('inventory_title'), icon: LucideIcons.package2, screen: const InventoryScreen()),
           SidebarItem(title: "Chat", icon: LucideIcons.messageSquare, screen: const ChatScreen()),
-          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: const SettingsScreen()),
+          SidebarItem(title: "Ajustes", icon: LucideIcons.settings, screen: SettingsScreen(onParticleChanged: _reloadParticlePrefs)),
         ];
     }
   }
@@ -388,14 +411,25 @@ class _MainLayoutState extends State<MainLayout> {
                       topLeft: Radius.circular(24),
                       bottomLeft: Radius.circular(24),
                     ),
-                    child: Container(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      child: Column(
-                        children: [
-                          _buildOfflineSyncBar(),
-                          Expanded(child: items[_selectedIndex].screen),
-                        ],
-                      ),
+                    child: Stack(
+                      children: [
+                        if (_particlesEnabled)
+                          Positioned.fill(
+                            child: ParticleBackground(
+                              primaryColor: _particlePrimary,
+                              secondaryColor: _particleSecondary,
+                            ),
+                          ),
+                        Container(
+                          color: Theme.of(context).scaffoldBackgroundColor.withOpacity(_particlesEnabled ? 0.88 : 1.0),
+                          child: Column(
+                            children: [
+                              _buildOfflineSyncBar(),
+                              Expanded(child: items[_selectedIndex].screen),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
