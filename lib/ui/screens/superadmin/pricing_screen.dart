@@ -137,7 +137,7 @@ class _PricingScreenState extends State<PricingScreen> {
     _editBillingInterval = plan['billing_interval']?.toString() ?? 'monthly';
     _editHighlighted = plan['is_highlighted'] == true;
     _editActive = plan['is_active'] == true;
-    _editingPlanId = plan['id'] as int?;
+    _editingPlanId = plan['id'] is int ? plan['id'] as int? : int.tryParse(plan['id']?.toString() ?? '');
 
     final features = plan['features'];
     if (features is List) {
@@ -285,7 +285,8 @@ class _PricingScreenState extends State<PricingScreen> {
             showDeleteButton: true,
             onDelete: () {
               Navigator.pop(ctx);
-              _showDeletePlanDialog(plan['id'] as int);
+              final idVal = plan['id'] is int ? plan['id'] as int : int.tryParse(plan['id']?.toString() ?? '');
+              if (idVal != null) _showDeletePlanDialog(idVal);
             },
           ),
         ),
@@ -840,10 +841,10 @@ class _PricingScreenState extends State<PricingScreen> {
     final isActive = plan['is_active'] == true;
     final features = plan['features'] is List ? plan['features'] as List : (plan['features']?.toString().split(',').map((f) => f.trim()).where((f) => f.isNotEmpty).toList() ?? []);
     final price = plan['price']?.toString() ?? '0';
-    final discount = plan['discount_percentage'] as int? ?? 0;
+    final discount = (plan['discount_percentage'] is int ? plan['discount_percentage'] as int? : int.tryParse(plan['discount_percentage']?.toString() ?? '')) ?? 0;
     final hasDiscount = discount > 0;
     final billingInterval = plan['billing_interval']?.toString() ?? 'monthly';
-    final planId = plan['id'] as int;
+    final planId = (plan['id'] is int ? plan['id'] as int? : int.tryParse(plan['id']?.toString() ?? '')) ?? 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
